@@ -1,17 +1,25 @@
 # Local Silo data lake for development.
-#   docker compose up -d     -> S3 API on :9000, web console on http://localhost:9001
+#   docker compose up -d     -> S3 API on :9100, web console on http://localhost:9101
+#
+# Host ports 9100/9101 (not the usual 9000/9001) so this stack can run next
+# to another MinIO on the same machine. Inside the container Silo still
+# listens on 9000/9001.
 #
 # Silo (https://github.com/pgsty/silo) is the community-maintained fork of
 # MinIO, which was archived upstream in 2026. It is protocol- and
 # on-disk-compatible with MinIO, so the `minio` Python client and the
 # MINIO_* variables keep working unchanged.
+name: hmis-silo
+
 services:
   silo:
     image: pgsty/silo:RELEASE.2026-10-26T00-00-00Z
     command: server /data --console-address ":9001"
+    # WSL stops the distro (and Docker) when idle; come back up with Docker.
+    restart: unless-stopped
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9100:9000"
+      - "9101:9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}

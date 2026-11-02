@@ -18,7 +18,7 @@ source:
 
 # Silo (community fork of MinIO) or any S3-compatible store.
 datalake:
-  endpoint: ${MINIO_ENDPOINT:-localhost:9000}   # host:port, no scheme
+  endpoint: ${MINIO_ENDPOINT:-localhost:9100}   # host:port, no scheme
   access_key: ${MINIO_ACCESS_KEY:-minioadmin}
   secret_key: ${MINIO_SECRET_KEY:-minioadmin}
   secure: ${MINIO_SECURE:-false}                # true when MinIO is behind TLS

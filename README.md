@@ -51,7 +51,7 @@ python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env            # then edit MINIO_* to point at your MinIO
 
-docker compose up -d              # optional: local Silo (console on :9001)
+docker compose up -d              # optional: local Silo (API :9100, console http://localhost:9101)
 
 python dataset_ingestion.py                                   # config defaults
 python dataset_ingestion.py --mode full --lookback-months 3 --datasets child_health

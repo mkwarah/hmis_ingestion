@@ -4,6 +4,7 @@
 #     Silo        S3 API :9100   console http://localhost:9101
 #     ClickHouse  HTTP   :8124   native  :9010   play UI http://localhost:8124/play
 #     Prefect     UI + API       http://localhost:4200
+#     Metabase    dashboards     http://localhost:3010
 #
 # Host ports are shifted from the usual ones (9000/9001, 8123/9000) so this
 # stack can run next to another MinIO and ClickHouse on the same machine.
@@ -49,12 +50,15 @@ services:
       SILO_URL: http://silo:9000/${MINIO_BUCKET:-hmis-datalake}/
       SILO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       SILO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      # Read-only dashboard user (clickhouse/users.d/metabase.xml)
+      CLICKHOUSE_BI_PASSWORD: ${CLICKHOUSE_BI_PASSWORD:-metabase}
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       # Mount the file, not the folder: config.d already holds the image's
       # docker_related_config.xml (listen on all interfaces).
       - ./clickhouse/config.d/silo.xml:/etc/clickhouse-server/config.d/silo.xml:ro
       - ./clickhouse/users.d/hmis.xml:/etc/clickhouse-server/users.d/hmis.xml:ro
+      - ./clickhouse/users.d/metabase.xml:/etc/clickhouse-server/users.d/metabase.xml:ro
     ulimits:
       nofile:
         soft: 262144
@@ -74,7 +78,25 @@ services:
     volumes:
       - prefect-data:/root/.prefect
 
+  # Dashboards on the gold layer. Connects to ClickHouse as the read-only
+  # `metabase` user; set up by metabase/setup_metabase.py.
+  metabase:
+    image: metabase/metabase:v0.65.2.5
+    restart: unless-stopped
+    depends_on:
+      - clickhouse
+    ports:
+      - "3010:3000"
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db     # Metabase's own settings (H2)
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      JAVA_TIMEZONE: Africa/Kigali
+    volumes:
+      - metabase-data:/metabase-data
+
 volumes:
   silo-data:
   clickhouse-data:
   prefect-data:
+  metabase-data:

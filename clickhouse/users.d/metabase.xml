@@ -1,0 +1,28 @@
+<!--
+  Read-only user for dashboards (Metabase). It can only read the `gold`
+  database: no writes, no DDL, no access to `lake` views or the Silo
+  named collection. readonly=2 still lets the client change query
+  settings (Metabase sets some per query), but not data.
+  Password from CLICKHOUSE_BI_PASSWORD (docker-compose.yml).
+-->
+<clickhouse>
+    <profiles>
+        <readonly_bi>
+            <readonly>2</readonly>
+            <max_execution_time>60</max_execution_time>
+        </readonly_bi>
+    </profiles>
+    <users>
+        <metabase>
+            <password from_env="CLICKHOUSE_BI_PASSWORD"/>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>readonly_bi</profile>
+            <quota>default</quota>
+            <allow_databases>
+                <database>gold</database>
+            </allow_databases>
+        </metabase>
+    </users>
+</clickhouse>

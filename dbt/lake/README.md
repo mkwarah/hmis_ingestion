@@ -1,6 +1,6 @@
 # hmis_lake: the data lake layers (Silo)
 
-dbt project that turns the bronze Parquet written by the Prefect pipeline into
+dbt project that turns the landing Parquet written by the Prefect pipeline into
 the staging and intermediate layers, **written back to Silo as Parquet**.
 DuckDB does the work; the local `.duckdb` file only keeps views pointing at
 the files. The gold marts are built from here by [`../warehouse`](../warehouse)
@@ -8,7 +8,7 @@ in ClickHouse.
 
 ```
 s3://hmis-datalake/
-  bronze/dhis2/...                      landing  (Prefect writes; dbt sources)
+  landing/dhis2/...                      landing  (Prefect writes; dbt sources)
   staging/dhis2/stg_dhis2__*.parquet    staging  (this project)
   intermediate/dhis2/int_dhis2__*.parquet   intermediate (this project) ──▶ ClickHouse gold
 ```

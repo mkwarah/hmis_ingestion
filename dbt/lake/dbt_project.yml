@@ -1,6 +1,6 @@
 # dbt project for the DATA LAKE half of the platform (Silo).
 #
-#   landing      - sources: bronze Parquet written by the Prefect pipeline.
+#   landing      - sources: landing Parquet written by the Prefect pipeline.
 #                  dbt only reads them.
 #   staging      - one model per source: rename, cast, trim, parse DHIS2
 #                  periods. No joins.        -> s3://hmis-datalake/staging/
@@ -26,7 +26,7 @@ snapshot-paths: ["snapshots"]
 clean-targets: ["target", "dbt_packages"]
 
 # The lake bucket comes from HMIS_LAKE_BUCKET (default s3://hmis-datalake),
-# set as external_root in profiles.yml. Sources read <bucket>/bronze/dhis2;
+# set as external_root in profiles.yml. Sources read <bucket>/landing/dhis2;
 # models write <bucket>/<schema>/dhis2/<model>.parquet
 # (macros/external_location.sql).
 models:

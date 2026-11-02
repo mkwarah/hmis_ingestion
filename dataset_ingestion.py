@@ -2,11 +2,11 @@
 
 Pipeline per run:
     1. Snapshot metadata (data elements, org units, category option combos,
-       data sets)        -> raw JSON + bronze Parquet
+       data sets)        -> raw JSON + landing Parquet
     2. For each enabled data set:
          plan requests (full window or incremental since last watermark)
          -> extract data values in parallel  -> raw JSON (one object/request)
-         -> normalise, de-duplicate, enrich  -> bronze Parquet per period
+         -> normalise, de-duplicate, enrich  -> landing Parquet per period
          -> advance the watermark
     3. Write a run manifest to ``_runs/``.
 
@@ -82,7 +82,7 @@ def get_server_time(config_path: str) -> str:
 
 @task(retries=3, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="metadata-{entity_name}")
 def ingest_metadata(config_path: str, entity_name: str, run_id: str) -> dict:
-    """Snapshot one metadata resource to raw JSON and a bronze Parquet table."""
+    """Snapshot one metadata resource to raw JSON and a landing Parquet table."""
     logger = get_run_logger()
     cfg = load_config(config_path)
     entity = next(m for m in cfg["metadata"] if m["name"] == entity_name)
@@ -98,11 +98,11 @@ def ingest_metadata(config_path: str, entity_name: str, run_id: str) -> dict:
     if entity_name == "organisation_units" and not df.empty:
         df = org_unit_hierarchy(df)
     df["ingested_at"] = utc_now()
-    bronze_key = f"{lake_cfg['bronze_prefix']}/metadata/{entity_name}/{entity_name}.parquet"
-    lake.put_parquet(bronze_key, df)
+    landing_key = f"{lake_cfg['landing_prefix']}/metadata/{entity_name}/{entity_name}.parquet"
+    lake.put_parquet(landing_key, df)
 
-    logger.info("%s: %d records -> %s", entity_name, len(df), lake.uri(bronze_key))
-    return {"entity": entity_name, "rows": len(df), "raw_key": raw_key, "bronze_key": bronze_key}
+    logger.info("%s: %d records -> %s", entity_name, len(df), lake.uri(landing_key))
+    return {"entity": entity_name, "rows": len(df), "raw_key": raw_key, "landing_key": landing_key}
 
 
 @task(cache_policy=NO_CACHE, task_run_name="plan-{dataset_key}")
@@ -166,8 +166,8 @@ def extract_data_values(
     return {"raw_key": raw_key, "rows": rows}
 
 
-@task(retries=1, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="load-bronze-{dataset_key}")
-def load_bronze(config_path: str, dataset_key: str, raw_keys: list[str], mode: str) -> dict:
+@task(retries=1, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="load-landing-{dataset_key}")
+def load_landing(config_path: str, dataset_key: str, raw_keys: list[str], mode: str) -> dict:
     """Raw JSON -> typed, enriched Parquet partitioned by period.
 
     full:        each touched period partition is overwritten.
@@ -187,7 +187,7 @@ def load_bronze(config_path: str, dataset_key: str, raw_keys: list[str], mode: s
         logger.info("%s: nothing new to load", dataset_key)
         return {"dataset": dataset_key, "rows": 0, "partitions": []}
 
-    md_prefix = f"{lake_cfg['bronze_prefix']}/metadata"
+    md_prefix = f"{lake_cfg['landing_prefix']}/metadata"
     lookups = {
         name: lake.get_parquet(f"{md_prefix}/{name}/{name}.parquet")
         for name in ("data_elements", "category_option_combos", "organisation_units", "data_sets")
@@ -199,7 +199,7 @@ def load_bronze(config_path: str, dataset_key: str, raw_keys: list[str], mode: s
 
     partitions = []
     for period, part in df.groupby("period", sort=True):
-        key = f"{lake_cfg['bronze_prefix']}/data_values/dataset={dataset_key}/period={period}/data.parquet"
+        key = f"{lake_cfg['landing_prefix']}/data_values/dataset={dataset_key}/period={period}/data.parquet"
         if mode == "incremental" and lake.exists(key):
             # New rows come last so they win the de-duplication.
             part = pd.concat([lake.get_parquet(key), part], ignore_index=True)
@@ -212,7 +212,7 @@ def load_bronze(config_path: str, dataset_key: str, raw_keys: list[str], mode: s
         dataset_key,
         len(df),
         len(partitions),
-        lake.uri(f"{lake_cfg['bronze_prefix']}/data_values/dataset={dataset_key}/"),
+        lake.uri(f"{lake_cfg['landing_prefix']}/data_values/dataset={dataset_key}/"),
     )
     return {"dataset": dataset_key, "rows": len(df), "partitions": partitions}
 
@@ -257,7 +257,7 @@ def ingest_dataset(
     run_id: str,
     watermark: str,
 ) -> dict:
-    """Extract -> raw -> bronze -> watermark for a single DHIS2 data set."""
+    """Extract -> raw -> landing -> watermark for a single DHIS2 data set."""
     today = date.fromisoformat(watermark[:10])
     effective_mode, requests_ = plan_requests(config_path, dataset_key, mode, lookback_months, today)
 
@@ -273,7 +273,7 @@ def ingest_dataset(
     ]
     extracted = [f.result() for f in futures]
 
-    summary = load_bronze(config_path, dataset_key, [e["raw_key"] for e in extracted], effective_mode)
+    summary = load_landing(config_path, dataset_key, [e["raw_key"] for e in extracted], effective_mode)
     update_watermark(config_path, dataset_key, watermark, run_id, effective_mode, summary["rows"])
     return {
         "dataset": dataset_key,

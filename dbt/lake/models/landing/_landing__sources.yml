@@ -1,13 +1,13 @@
 version: 2
 
-# The landing zone: bronze Parquet written to Silo by the Prefect pipeline
+# The landing zone: landing Parquet written to Silo by the Prefect pipeline
 # (dataset_ingestion.py). dbt-duckdb reads each table through
 # `external_location`, so `{{ source('landing', 'data_values') }}` becomes a
 # read_parquet() call against s3://hmis-datalake/...
 
 sources:
   - name: landing
-    description: Bronze layer of the HMIS data lake in Silo, loaded from the DHIS2 demo by Prefect.
+    description: Landing layer of the HMIS data lake in Silo, loaded from the DHIS2 demo by Prefect.
     tables:
       - name: data_values
         description: >
@@ -20,7 +20,7 @@ sources:
           # folder name would add a clashing second one. filename=true keeps the
           # source object path for lineage.
           external_location: >-
-            read_parquet('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/bronze/dhis2/data_values/dataset=*/period=*/data.parquet',
+            read_parquet('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/data_values/dataset=*/period=*/data.parquet',
                          union_by_name = true, hive_partitioning = false, filename = true)
         loaded_at_field: ingested_at
         freshness:
@@ -37,19 +37,19 @@ sources:
       - name: data_elements
         description: Snapshot of DHIS2 data elements (what is counted).
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/bronze/dhis2/metadata/data_elements/data_elements.parquet')"
+          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/data_elements/data_elements.parquet')"
 
       - name: organisation_units
         description: Snapshot of DHIS2 organisation units (country, district, chiefdom, facility).
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/bronze/dhis2/metadata/organisation_units/organisation_units.parquet')"
+          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/organisation_units/organisation_units.parquet')"
 
       - name: category_option_combos
         description: Snapshot of disaggregations, e.g. "Fixed, <1y".
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/bronze/dhis2/metadata/category_option_combos/category_option_combos.parquet')"
+          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/category_option_combos/category_option_combos.parquet')"
 
       - name: data_sets
         description: Snapshot of DHIS2 data sets (reporting forms) and their period type.
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/bronze/dhis2/metadata/data_sets/data_sets.parquet')"
+          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/data_sets/data_sets.parquet')"

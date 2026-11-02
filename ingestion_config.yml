@@ -26,10 +26,10 @@ datalake:
   bucket: ${MINIO_BUCKET:-hmis-datalake}
   # Layout inside the bucket:
   #   raw/     - untouched API payloads (gzipped JSON), one object per request
-  #   bronze/  - typed, enriched Parquet partitioned by dataset and period
+  #   landing/  - typed, enriched Parquet partitioned by dataset and period
   #   _state/  - incremental watermarks;  _runs/ - per-run manifests
   raw_prefix: raw/dhis2
-  bronze_prefix: bronze/dhis2
+  landing_prefix: landing/dhis2
   state_prefix: _state/dhis2
   runs_prefix: _runs/dhis2
 

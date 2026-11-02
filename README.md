@@ -2,7 +2,7 @@
 
 ```
 DHIS2 ─Prefect─▶ Silo (data lake)                                   ClickHouse (warehouse)
-                 raw/ → bronze/ (landing) → staging/ → intermediate/ ─▶ gold marts
+                 raw/ → landing/ → staging/ → intermediate/ ─▶ gold marts
                  └─ Prefect ─┘             └─ dbt/lake (DuckDB) ─┘      └ dbt/warehouse
 ```
 
@@ -13,7 +13,7 @@ speaks the same S3 API, so the code uses the standard `minio` client.
 | File | Purpose |
 |---|---|
 | `hmis.py` | Base layer: config loader, `DHIS2Client`, `DataLake` (MinIO), transforms |
-| `dataset_ingestion.py` | Prefect flows and tasks (extract → raw → bronze → watermark) |
+| `dataset_ingestion.py` | Prefect flows and tasks (extract → raw → landing → watermark) |
 | `ingestion_config.yml` | Source, data lake, metadata and dataset settings |
 | `prefect.yaml` | Deployments: daily incremental, weekly full refresh, manual backfill |
 | `docker-compose.yml` | Local Silo (lake) and ClickHouse (warehouse) for development |
@@ -27,13 +27,13 @@ speaks the same S3 API, so the code uses the standard `minio` client.
 ```
 raw/dhis2/metadata/<entity>/run_id=<ts>/<entity>.json.gz
 raw/dhis2/data_values/dataset=<key>/run_id=<ts>/<YYYY-MM|incremental>.json.gz
-bronze/dhis2/metadata/<entity>/<entity>.parquet                  # latest snapshot
-bronze/dhis2/data_values/dataset=<key>/period=<period>/data.parquet
+landing/dhis2/metadata/<entity>/<entity>.parquet                  # latest snapshot
+landing/dhis2/data_values/dataset=<key>/period=<period>/data.parquet
 _state/dhis2/data_values/<key>.json                              # incremental watermark
 _runs/dhis2/<run_id>.json                                        # run manifest
 ```
 
-Bronze data values carry the natural key (`data_element_id, period,
+Landing data values carry the natural key (`data_element_id, period,
 org_unit_id, category_option_combo_id, attribute_option_combo_id`), the raw
 `value` plus `value_numeric`, and the enrichment columns: data element name and
 type, category option combo name, org unit name and level, the hierarchy

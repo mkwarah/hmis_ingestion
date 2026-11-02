@@ -1,12 +1,22 @@
-# Prefect project file for the HMIS ingestion pipeline.
+# Prefect project file for the HMIS pipeline.
 #
+# Every deployment runs `hmis_pipeline`: ingestion (DHIS2 -> Silo), then
+# dbt build of the lake (Silo) and of the warehouse (ClickHouse). A failure
+# at any step stops the run.
+#
+# One-time setup (in WSL, with the ingestion venv active):
+#   prefect profile create hmis
+#   prefect --profile hmis config set PREFECT_API_URL=http://localhost:4200/api
+#   prefect profile use hmis
 #   prefect work-pool create hmis-process-pool --type process
 #   prefect deploy --all
+#
+# Then keep a worker running (it executes the scheduled runs):
+#   export HMIS_PROJECT_DIR="$(pwd)"
 #   prefect worker start --pool hmis-process-pool
 #
-# Workers need the environment variables from .env.example (DHIS2_* and
-# MINIO_*), either exported in the worker's shell or in a .env file in this
-# directory.
+# The worker reads MINIO_*, CLICKHOUSE_* and DBT_EXECUTABLE from the .env
+# file in this directory (see .env.example).
 
 name: hmis-data-ingestion
 prefect-version: 3.4.0
@@ -29,12 +39,13 @@ definitions:
     - hmis
     - dhis2
     - datalake
+    - dbt
 
 deployments:
-  # Daily incremental pull of everything changed since the last run.
-  - name: hmis-dhis2-incremental
-    description: Daily incremental ingestion of DHIS2 aggregate data into MinIO.
-    entrypoint: dataset_ingestion.py:hmis_ingestion
+  # Daily: changes since the last run, then rebuild lake and gold.
+  - name: hmis-daily-incremental
+    description: Daily incremental DHIS2 ingestion, then dbt lake and warehouse builds.
+    entrypoint: dataset_ingestion.py:hmis_pipeline
     tags: *tags
     parameters:
       config_path: ingestion_config.yml
@@ -46,11 +57,11 @@ deployments:
         timezone: Africa/Kigali
         active: true
 
-  # Weekly full refresh of the lookback window to pick up deletions and
-  # anything the incremental runs could have missed.
-  - name: hmis-dhis2-full-refresh
-    description: Weekly full reload of the last 12 months.
-    entrypoint: dataset_ingestion.py:hmis_ingestion
+  # Weekly: reload the last 12 months to pick up deletions and anything the
+  # incremental runs could have missed, then rebuild.
+  - name: hmis-weekly-full-refresh
+    description: Weekly full reload of the last 12 months, then dbt lake and warehouse builds.
+    entrypoint: dataset_ingestion.py:hmis_pipeline
     tags: *tags
     parameters:
       config_path: ingestion_config.yml
@@ -64,11 +75,12 @@ deployments:
         active: true
 
   # Manual backfills: run with custom parameters from the UI or CLI, e.g.
-  #   prefect deployment run "hmis-dataset-ingestion/hmis-dhis2-backfill" \
+  #   prefect deployment run "hmis-pipeline/hmis-backfill" \
   #     -p lookback_months=36 -p 'datasets=["child_health"]'
-  - name: hmis-dhis2-backfill
-    description: On-demand full backfill; no schedule.
-    entrypoint: dataset_ingestion.py:hmis_ingestion
+  # Add -p with_dbt=false to ingest without rebuilding the models.
+  - name: hmis-backfill
+    description: On-demand full backfill, then dbt builds; no schedule.
+    entrypoint: dataset_ingestion.py:hmis_pipeline
     tags: *tags
     parameters:
       config_path: ingestion_config.yml

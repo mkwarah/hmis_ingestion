@@ -45,6 +45,21 @@ ingestion:
   chunk_months: 1
   overlap_days: 7
 
+# After ingestion the pipeline runs `dbt build` in each project, in order:
+#   lake      (dbt-duckdb)     landing -> staging -> intermediate, Parquet in Silo
+#   warehouse (dbt-clickhouse) intermediate in Silo -> gold marts in ClickHouse
+# A failing model or test stops the run, so gold is never built from bad data.
+transform:
+  enabled: true
+  # dbt lives in its own virtualenv; point at its executable.
+  dbt_executable: ${DBT_EXECUTABLE:-dbt}
+  projects:                     # relative paths are resolved from this file
+    lake: dbt/lake
+    warehouse: dbt/warehouse
+  # Extra environment for dbt (MINIO_* and CLICKHOUSE_* are passed through).
+  env:
+    HMIS_DUCKDB_PATH: ${HMIS_DUCKDB_PATH:-~/hmis-data/hmis_lake.duckdb}
+
 # Metadata snapshots, refreshed every run and used to enrich data values.
 metadata:
   - name: data_elements

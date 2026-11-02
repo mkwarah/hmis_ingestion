@@ -1,7 +1,9 @@
-# Local data platform for development: Silo (data lake) + ClickHouse (warehouse).
+# Local data platform for development:
+# Silo (data lake) + ClickHouse (warehouse) + Prefect server (orchestrator).
 #   docker compose up -d
 #     Silo        S3 API :9100   console http://localhost:9101
 #     ClickHouse  HTTP   :8124   native  :9010   play UI http://localhost:8124/play
+#     Prefect     UI + API       http://localhost:4200
 #
 # Host ports are shifted from the usual ones (9000/9001, 8123/9000) so this
 # stack can run next to another MinIO and ClickHouse on the same machine.
@@ -58,6 +60,21 @@ services:
         soft: 262144
         hard: 262144
 
+  # Orchestrator: API, UI and scheduler. The worker that runs the flows
+  # runs on the host (WSL), where the code, DHIS2 access and dbt live.
+  prefect:
+    image: prefecthq/prefect:3.9.1-python3.12
+    command: prefect server start --host 0.0.0.0 --port 4200
+    restart: unless-stopped
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_UI_API_URL: http://localhost:4200/api
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+    volumes:
+      - prefect-data:/root/.prefect
+
 volumes:
   silo-data:
   clickhouse-data:
+  prefect-data:

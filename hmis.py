@@ -7,6 +7,7 @@ reused from notebooks, tests or other flows:
 * ``DHIS2Client``      - thin, retrying client for the DHIS2 Web API
 * ``DataLake``         - MinIO / S3 object-store wrapper (JSON, Parquet, state)
 * transform helpers    - turn raw DHIS2 payloads into tidy, enriched DataFrames
+* ``run_dbt``          - run a dbt command in the lake or warehouse project
 """
 
 from __future__ import annotations
@@ -430,3 +431,84 @@ def enrich_data_values(
     out["data_set_name"] = data_set_name
     out["ingested_at"] = utc_now()
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Transform: dbt
+# --------------------------------------------------------------------------- #
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+class DbtError(RuntimeError):
+    """dbt exited non-zero (a model errored or a test failed)."""
+
+    def __init__(self, message: str, summary: dict):
+        super().__init__(message)
+        self.summary = summary
+
+
+def run_dbt(
+    transform_cfg: dict,
+    project: str,
+    args: list[str],
+    on_line=None,
+) -> dict:
+    """Run a dbt command in one of the dbt projects and summarise the result.
+
+    dbt runs as a separate program (``transform.dbt_executable``), usually
+    from its own virtualenv, so its dependencies never clash with the
+    pipeline's. The child inherits this process's environment (MINIO_*,
+    CLICKHOUSE_*, loaded from .env by ``load_config``) plus
+    ``transform.env``.
+
+    Args:
+        transform_cfg: the ``transform`` section of the config.
+        project: key under ``transform.projects`` (``lake``, ``warehouse``).
+        args: dbt arguments, e.g. ``["build"]``.
+        on_line: called with each output line (for logging); optional.
+
+    Returns:
+        ``{"project", "command", "returncode", "counts": {status: n}, "elapsed"}``.
+        Raises ``DbtError`` (carrying that summary) when dbt exits non-zero.
+    """
+    import subprocess
+
+    project_dir = Path(transform_cfg["projects"][project]).expanduser().resolve()
+    executable = str(Path(transform_cfg.get("dbt_executable", "dbt")).expanduser())
+    env = {**os.environ, "DBT_SEND_ANONYMOUS_USAGE_STATS": "false"}
+    env.update({k: str(Path(v).expanduser()) if str(v).startswith("~") else str(v)
+                for k, v in (transform_cfg.get("env") or {}).items()})
+    if "HMIS_DUCKDB_PATH" in env:
+        Path(env["HMIS_DUCKDB_PATH"]).parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [executable, *args, "--project-dir", str(project_dir),
+           "--profiles-dir", str(project_dir), "--no-use-colors"]
+    started = utc_now()
+    proc = subprocess.Popen(
+        cmd, cwd=project_dir, env=env, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=1,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        line = _ANSI.sub("", line.rstrip())
+        if line and on_line:
+            on_line(line)
+    returncode = proc.wait()
+
+    counts: dict[str, int] = {}
+    results_path = project_dir / "target" / "run_results.json"
+    if results_path.exists() and results_path.stat().st_mtime >= started.timestamp() - 1:
+        for result in json.loads(results_path.read_text(encoding="utf-8")).get("results", []):
+            status = str(result.get("status", "unknown")).lower()
+            counts[status] = counts.get(status, 0) + 1
+
+    summary = {
+        "project": project,
+        "command": " ".join(args),
+        "returncode": returncode,
+        "counts": counts,
+        "elapsed": round((utc_now() - started).total_seconds(), 1),
+    }
+    if returncode != 0:
+        raise DbtError(f"dbt {' '.join(args)} failed in '{project}' (exit {returncode}): {counts}", summary)
+    return summary

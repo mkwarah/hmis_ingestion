@@ -53,28 +53,76 @@ type, category option combo name, org unit name and level, the hierarchy
 - A failing dataset doesn't stop the others. The run is still marked failed
   and its manifest records the error.
 
-## Quick start
+## Quick start (WSL)
 
-```powershell
-python -m venv .venv; .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy .env.example .env            # then edit MINIO_* to point at your MinIO
+Everything runs in WSL Ubuntu (Docker lives there). Two virtualenvs keep
+Prefect and dbt dependencies apart.
 
-docker compose up -d              # optional: local Silo (API :9100, console http://localhost:9101)
+```bash
+cd "<repo>"
+cp .env.example .env                       # then set DBT_EXECUTABLE (see below)
 
-python dataset_ingestion.py                                   # config defaults
+python3 -m venv ~/venvs/hmis-ingestion     # pipeline: Prefect, minio, pandas
+~/venvs/hmis-ingestion/bin/pip install -r requirements.txt
+python3 -m venv ~/venvs/hmis-dbt           # dbt + DuckDB + ClickHouse adapters
+~/venvs/hmis-dbt/bin/pip install "dbt-core>=1.10" "dbt-duckdb>=1.9" "dbt-clickhouse>=1.9"
+# .env: DBT_EXECUTABLE=/home/<you>/venvs/hmis-dbt/bin/dbt
+
+docker compose up -d     # Silo :9100/:9101, ClickHouse :8124, Prefect UI :4200
+
+source ~/venvs/hmis-ingestion/bin/activate
+python dataset_ingestion.py                # ingest -> dbt lake -> dbt warehouse
+python dataset_ingestion.py --skip-dbt     # ingest only
 python dataset_ingestion.py --mode full --lookback-months 3 --datasets child_health
 ```
 
-## Deploy on Prefect
+## Orchestration (Prefect)
 
-```powershell
-prefect server start                       # or: prefect cloud login
-prefect work-pool create hmis-process-pool --type process
-$env:HMIS_PROJECT_DIR = (Get-Location).Path
-prefect deploy --all
-prefect worker start --pool hmis-process-pool
+The deployed flow is `hmis-pipeline` (`dataset_ingestion.py:hmis_pipeline`):
+
 ```
+hmis-pipeline
+├─ hmis-dataset-ingestion      DHIS2 -> raw/ + landing/        (subflow, one per data set)
+├─ dbt-build-lake              landing -> staging -> intermediate   (Silo, DuckDB)
+└─ dbt-build-warehouse         intermediate -> gold                  (ClickHouse)
+```
+
+Steps run in order and the run stops at the first failure: a failed data
+set, a dbt model error or a failed dbt test. Gold is therefore never rebuilt
+from bad data. dbt warnings (severity `warn`) are logged but do not stop it.
+dbt runs as a separate program (`DBT_EXECUTABLE`), and its output appears in
+the task logs.
+
+| Deployment | Schedule (Africa/Kigali) | What it does |
+|---|---|---|
+| `hmis-daily-incremental` | daily 02:00 | values changed since last run, then dbt |
+| `hmis-weekly-full-refresh` | Sunday 03:00 | reload last 12 months, then dbt |
+| `hmis-backfill` | manual | full reload (default 24 months), then dbt |
+
+One-time setup:
+
+```bash
+source ~/venvs/hmis-ingestion/bin/activate
+prefect profile create hmis
+prefect --profile hmis config set PREFECT_API_URL=http://localhost:4200/api
+prefect profile use hmis
+prefect work-pool create hmis-process-pool --type process
+prefect deploy --all
+```
+
+Run the worker (keep the terminal open; it executes every run):
+
+```bash
+./start_worker.sh
+```
+
+Start a run by hand: Prefect UI http://localhost:4200 → Deployments →
+Run, or `prefect deployment run "hmis-pipeline/hmis-daily-incremental"`.
+
+**On a laptop:** WSL stops Ubuntu when no terminal is open, which stops
+Docker and the worker. Scheduled runs only happen while Ubuntu is running;
+missed ones show as *Late* in the UI. The containers restart by themselves
+when Ubuntu starts; the worker needs `./start_worker.sh` again.
 
 ## Adding a dataset
 

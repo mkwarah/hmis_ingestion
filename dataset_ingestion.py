@@ -1,16 +1,22 @@
-"""Prefect flow: ingest DHIS2 (HMIS) aggregate data into the MinIO data lake.
+"""Prefect flows: DHIS2 (HMIS) -> Silo data lake -> ClickHouse warehouse.
 
-Pipeline per run:
-    1. Snapshot metadata (data elements, org units, category option combos,
-       data sets)        -> raw JSON + landing Parquet
-    2. For each enabled data set:
-         plan requests (full window or incremental since last watermark)
-         -> extract data values in parallel  -> raw JSON (one object/request)
-         -> normalise, de-duplicate, enrich  -> landing Parquet per period
-         -> advance the watermark
-    3. Write a run manifest to ``_runs/``.
+``hmis_pipeline`` (the deployed flow) runs three steps in order and stops at
+the first failure, so gold is never rebuilt from bad data:
 
-Run locally:      python dataset_ingestion.py
+    1. ``hmis_ingestion``  DHIS2 -> raw/ + landing/ in Silo
+         a. snapshot metadata (data elements, org units, category option
+            combos, data sets)              -> raw JSON + landing Parquet
+         b. for each enabled data set:
+              plan requests (full window or incremental since last watermark)
+              -> extract data values in parallel  -> raw JSON (one object/request)
+              -> normalise, de-duplicate, enrich  -> landing Parquet per period
+              -> advance the watermark
+         c. write a run manifest to ``_runs/``
+    2. ``dbt build`` in dbt/lake       landing -> staging -> intermediate (Silo)
+    3. ``dbt build`` in dbt/warehouse  intermediate -> gold marts (ClickHouse)
+
+Run locally:      python dataset_ingestion.py                (all three steps)
+Ingest only:      python dataset_ingestion.py --skip-dbt
 Run a backfill:   python dataset_ingestion.py --mode full --lookback-months 24
 Deploy:           prefect deploy --all   (see prefect.yaml)
 
@@ -32,6 +38,7 @@ from prefect.task_runners import ThreadPoolTaskRunner
 from hmis import (
     DATA_VALUE_KEY,
     DataLake,
+    DbtError,
     DHIS2Client,
     data_values_to_frame,
     date_windows,
@@ -40,6 +47,7 @@ from hmis import (
     metadata_to_frame,
     org_unit_hierarchy,
     payload_to_records,
+    run_dbt,
     utc_now,
 )
 
@@ -241,6 +249,35 @@ def write_manifest(config_path: str, run_id: str, manifest: dict) -> str:
     return lake.uri(lake.put_json(f"{cfg['datalake']['runs_prefix']}/{run_id}.json", manifest))
 
 
+@task(retries=1, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="dbt-build-{project}")
+def dbt_build(config_path: str, project: str) -> dict:
+    """Run ``dbt build`` (models + tests, in dependency order) in one dbt project.
+
+    dbt's output goes to the Prefect log line by line. Fails the task when a
+    model errors or a test fails; warnings (severity: warn) do not fail it.
+    The one retry covers a lake or warehouse that was briefly unreachable.
+    """
+    logger = get_run_logger()
+    cfg = load_config(config_path)
+    transform = dict(cfg["transform"])
+    base = Path(config_path).parent
+    transform["projects"] = {
+        name: str(path if Path(path).is_absolute() else base / path)
+        for name, path in transform["projects"].items()
+    }
+    try:
+        # Skip dbt's "START" lines; the OK/PASS/WARN/ERROR line follows each one.
+        summary = run_dbt(
+            transform, project, ["build"],
+            on_line=lambda line: None if " START " in line else logger.info(line),
+        )
+    except DbtError as exc:
+        logger.error("dbt build failed in %s: %s", project, exc.summary["counts"])
+        raise
+    logger.info("dbt build %s: %s in %ss", project, summary["counts"], summary["elapsed"])
+    return summary
+
+
 # --------------------------------------------------------------------------- #
 # Flows
 # --------------------------------------------------------------------------- #
@@ -362,20 +399,59 @@ def hmis_ingestion(
     return manifest
 
 
+@flow(name="hmis-pipeline", log_prints=True)
+def hmis_pipeline(
+    config_path: str = DEFAULT_CONFIG,
+    mode: str | None = None,
+    datasets: list[str] | None = None,
+    lookback_months: int | None = None,
+    with_dbt: bool = True,
+) -> dict:
+    """End to end: DHIS2 -> Silo (lake) -> ClickHouse (warehouse).
+
+    Steps run in order and the flow stops at the first failure:
+      1. ingestion       hmis_ingestion subflow (raises if any data set failed)
+      2. dbt lake        landing -> staging -> intermediate, Parquet in Silo
+      3. dbt warehouse   intermediate -> gold marts in ClickHouse
+
+    Args:
+        config_path, mode, datasets, lookback_months: passed to ingestion.
+        with_dbt: False to ingest only (also skipped when transform.enabled
+            is false in the config).
+    """
+    config_path = _resolve_config(config_path)
+    cfg = load_config(config_path)
+
+    manifest = hmis_ingestion(config_path, mode, datasets, lookback_months)
+    result = {"run_id": manifest["run_id"], "ingestion": manifest["datasets"], "dbt": []}
+
+    if not (with_dbt and cfg.get("transform", {}).get("enabled", True)):
+        print("dbt skipped")
+        return result
+
+    for project in ("lake", "warehouse"):
+        summary = dbt_build(config_path, project)
+        result["dbt"].append(summary)
+        print(f"dbt {project:<10} {summary['counts']}  ({summary['elapsed']}s)")
+    return result
+
+
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the HMIS ingestion flow locally")
+    parser = argparse.ArgumentParser(description="Run the HMIS pipeline locally")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--mode", choices=["full", "incremental"])
     parser.add_argument("--datasets", nargs="+", help="Dataset keys (default: all enabled)")
     parser.add_argument("--lookback-months", type=int)
+    parser.add_argument("--skip-dbt", action="store_true", help="Ingest only; do not run dbt")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    hmis_ingestion(
+    hmis_pipeline(
         config_path=args.config,
         mode=args.mode,
         datasets=args.datasets,
         lookback_months=args.lookback_months,
+        with_dbt=not args.skip_dbt,
     )

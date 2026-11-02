@@ -1,6 +1,12 @@
 -- Data values joined to every dimension: what was counted, how it is
 -- disaggregated, where (full hierarchy), and through which data set.
 -- Same grain as stg_dhis2__data_values: one row per data value.
+--
+-- PII BOUNDARY: this is the first layer with no personal data. The hashed
+-- data-entry user (stored_by_hash) and the free-text comment from staging
+-- are NOT selected; only the fact that a comment exists is kept.
+-- assert_no_pii_in_intermediate enforces this.
+--
 -- Left joins keep values whose metadata is missing; the relationship tests
 -- in staging flag those cases.
 
@@ -73,12 +79,13 @@ select
     dv.value_raw,
     dv.value_numeric,
 
-    -- audit
-    dv.stored_by,
+    -- audit (no personal data)
     dv.created_at,
     dv.last_updated_at,
     dv.is_followup,
-    dv.ingested_at
+    dv.comment is not null                      as has_comment,
+    dv.ingested_at,
+    dv.run_id
 
 from data_values as dv
 left join data_elements          as de  on de.data_element_id = dv.data_element_id

@@ -25,7 +25,8 @@ models:
 
   - name: fct_weekly_idsr_district
     description: >
-      Weekly IDSR totals per district, ISO weeks only.
+      Weekly IDSR totals per district on ISO weeks (Wednesday weeks fill
+      weeks without an ISO report).
       Grain: week x district x data element x disaggregation.
     columns:
       - name: week_start
@@ -34,7 +35,40 @@ models:
         data_tests: [not_null]
 
   - name: fct_reporting_monthly_district
-    description: Facilities reporting per monthly data set, month and district (proxy rate).
+    description: >
+      Reporting rate per monthly data set, month and district: assigned
+      facilities that reported any value / facilities assigned the form.
     columns:
+      - name: facilities_expected
+        description: Facilities the form is assigned to in the district (DHIS2 data set assignments).
+        data_tests: [not_null]
+      - name: facilities_reporting
+        description: Assigned facilities that reported at least one value that month.
       - name: reporting_rate_pct
         data_tests: [not_null]
+      - name: facilities_reporting_unassigned
+        description: Facilities that reported but are not assigned the form (a data quality signal).
+
+  - name: fct_indicators_monthly_district
+    description: >
+      Derived indicators (coverage, dropout, low birth weight, stillbirth
+      rate) per district and month, with numerator and denominator so they
+      can be re-aggregated correctly: sum(numerator) / sum(denominator) * multiplier.
+    columns:
+      - name: indicator_code
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [IMM_BCG_COV, IMM_PENTA3_COV, IMM_MEASLES_COV, IMM_PENTA_DROPOUT,
+                         MAT_ANC1_COV, MAT_ANC_DROPOUT, MAT_LBW_PCT, MAT_STILLBIRTH_RATE]
+      - name: denominator
+        description: >
+          Coverage indicators use the yearly Population data set / 12. Null
+          when the district has no population figure for that year.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: value
+        description: numerator / denominator * multiplier for the district-month, rounded to 0.1.

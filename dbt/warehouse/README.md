@@ -9,14 +9,17 @@ Silo  s3://hmis-datalake/intermediate/dhis2/*.parquet
         │  s3(silo, ...)   named collection, no credentials in SQL
         ▼
 ClickHouse
-  lake.lake_dhis2__data_values           view: reads the Parquet live
-  lake.lake_dhis2__org_unit_hierarchy    view
+  lake.lake_dhis2__data_values           views: read the Parquet live
+  lake.lake_dhis2__weekly_values_iso
+  lake.lake_dhis2__org_unit_hierarchy
+  lake.lake_dhis2__data_set_assignments
         │
         ▼
   gold.dim_org_unit                      MergeTree tables (the marts)
   gold.fct_monthly_indicators_district
   gold.fct_weekly_idsr_district
   gold.fct_reporting_monthly_district
+  gold.fct_indicators_monthly_district
 ```
 
 | Mart | Grain | Notes |
@@ -24,7 +27,13 @@ ClickHouse
 | `dim_org_unit` | org unit | country → district → chiefdom → facility |
 | `fct_monthly_indicators_district` | data set × month × district × data element × disaggregation | monthly data sets; values with a mismatched period left out |
 | `fct_weekly_idsr_district` | ISO week × district × data element × disaggregation | Wednesday weeks fill ISO weeks with no ISO data (see below) |
-| `fct_reporting_monthly_district` | data set × month × district | facilities reporting / all facilities in district: a *proxy* rate (data set assignments not ingested yet) |
+| `fct_reporting_monthly_district` | data set × month × district | assigned facilities that reported any value ÷ facilities assigned the form (DHIS2 data set assignments); every district appears, 0% when nothing was reported |
+| `fct_indicators_monthly_district` | indicator × month × district | coverage (BCG, Penta3, Measles, ANC1), dropout (Penta1→3, ANC1→4), low birth weight %, stillbirth rate; long format with numerator, denominator and multiplier |
+
+**Rates are re-aggregated, never averaged.** National BCG coverage is
+`sum(numerator) / sum(denominator) * 100` over all districts, not the mean
+of district percentages. That is why the indicator mart keeps both parts.
+Coverage denominators are the yearly Population data set ÷ 12 per month.
 
 ## Run it (WSL)
 
@@ -67,6 +76,13 @@ GROUP BY 1 ORDER BY 2 DESC;
   `dim_org_unit`.
 - **`assert_gold_totals_match_lake`**: per data set, the gold total equals
   the lake total. Aggregation neither lost nor invented data.
+- **`assert_reporting_rate_within_bounds`**: a reporting rate can never
+  exceed 100% or the number of facilities expected.
+- Indicator codes must be known; an indicator without a denominator (e.g. a
+  missing population figure) is a warning.
+
+Gold receives no personal data: the lake's intermediate layer has already
+removed it (tested there).
 
 ## IDSR weeks
 

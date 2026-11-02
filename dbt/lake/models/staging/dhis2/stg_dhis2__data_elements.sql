@@ -1,6 +1,9 @@
+-- Latest data element snapshot, renamed and typed.
+
 with source as (
 
     select * from {{ source('landing', 'data_elements') }}
+    {{ latest_snapshot() }}
 
 )
 
@@ -8,11 +11,11 @@ select
     id                                  as data_element_id,
     nullif(trim(code), '')              as data_element_code,
     trim(name)                          as data_element_name,
-    trim(short_name)                    as data_element_short_name,
-    value_type,
-    aggregation_type,
-    domain_type,
-    cast(last_updated as timestamp)     as last_updated_at,
-    ingested_at
+    trim(shortName)                     as data_element_short_name,
+    valueType                           as value_type,
+    aggregationType                     as aggregation_type,
+    domainType                          as domain_type,
+    try_cast(lastUpdated as timestamp)  as last_updated_at,
+    run_id
 
 from source

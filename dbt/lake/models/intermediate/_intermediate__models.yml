@@ -10,8 +10,13 @@ models:
         data_tests: [not_null]
 
   - name: int_dhis2__data_values_enriched
-    description: Data values with names and the full org unit hierarchy. Input for the marts.
+    description: >
+      Data values with names and the full org unit hierarchy. Input for the
+      marts. The PII boundary: no personal data from here on (the hashed
+      data-entry user and the comment text stay in staging).
     columns:
+      - name: has_comment
+        description: True when the value had a data-entry comment (the text itself is not kept).
       - name: data_value_key
         data_tests: [unique, not_null]
       - name: data_element_name
@@ -45,3 +50,16 @@ models:
         data_tests: [not_null]
       - name: is_mapped_from_other_week_type
         description: True when the value was reported as a Wednesday week and moved.
+
+  - name: int_dhis2__data_set_assignments
+    description: >
+      Facilities expected to report each form (open org units only), with
+      district and chiefdom. Denominator of the reporting rate.
+    columns:
+      - name: data_set_org_unit_key
+        data_tests: [unique, not_null]
+      - name: district_name
+        data_tests:
+          - not_null:
+              config:
+                where: "org_unit_level >= 2"

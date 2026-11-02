@@ -1,11 +1,11 @@
--- Names in the DHIS2 demo carry stray leading spaces (' Panderu MCHP'),
--- so every text field is trimmed here, once, for everything downstream.
--- The pipeline's ou_level_* columns are dropped: the intermediate layer
--- rebuilds the hierarchy from `path` (see int_dhis2__org_unit_hierarchy).
+-- Latest org unit snapshot. Names in the DHIS2 demo carry stray leading
+-- spaces (' Panderu MCHP'), so every text field is trimmed here, once.
+-- The intermediate layer builds the hierarchy from `path`.
 
 with source as (
 
     select * from {{ source('landing', 'organisation_units') }}
+    {{ latest_snapshot() }}
 
 )
 
@@ -13,13 +13,13 @@ select
     id                                  as org_unit_id,
     nullif(trim(code), '')              as org_unit_code,
     trim(name)                          as org_unit_name,
-    trim(short_name)                    as org_unit_short_name,
+    trim(shortName)                     as org_unit_short_name,
     level                               as org_unit_level,
-    parent_id,
+    parent.id                           as parent_id,
     path,
-    cast(opening_date as date)          as opening_date,
-    cast(closed_date as date)           as closed_date,
-    cast(last_updated as timestamp)     as last_updated_at,
-    ingested_at
+    try_cast(openingDate as date)       as opening_date,
+    try_cast(closedDate as date)        as closed_date,
+    try_cast(lastUpdated as timestamp)  as last_updated_at,
+    run_id
 
 from source

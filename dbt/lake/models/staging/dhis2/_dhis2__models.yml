@@ -2,10 +2,14 @@ version: 2
 
 models:
   - name: stg_dhis2__data_values
-    description: One row per DHIS2 data value, typed, with the period parsed into dates.
+    description: >
+      First transformation of the landed dataValueSets payloads: unnested,
+      hoisted fields restored, current snapshot per data set and period,
+      de-duplicated, typed, period parsed into dates, and personal data
+      hashed. One row per current DHIS2 data value.
     columns:
       - name: data_value_key
-        description: md5 of data set + DHIS2 natural key.
+        description: md5 of data set + DHIS2 natural key (surrogate key).
         data_tests: [unique, not_null]
       - name: data_set_id
         data_tests:
@@ -35,6 +39,11 @@ models:
               arguments:
                 to: ref('stg_dhis2__category_option_combos')
                 field: category_option_combo_id
+      - name: attribute_option_combo_id
+        description: Restored from the payload level when DHIS2 hoisted it.
+        data_tests: [not_null]
+      - name: period
+        data_tests: [not_null]
       - name: period_type
         description: Parsed from the period ID. Null means a format the macro does not know.
         data_tests:
@@ -51,6 +60,22 @@ models:
         description: The value exactly as DHIS2 sent it (text).
       - name: value_numeric
         description: value_raw as a number; null for non-numeric values.
+      - name: stored_by_hash
+        description: >
+          Salted SHA-256 of the DHIS2 user who entered the value (storedBy).
+          Pseudonymised: groupable per user, not reversible without the salt.
+          Dropped in intermediate.
+        meta: {pii: pseudonymised}
+      - name: comment
+        description: Free-text data-entry comment. May contain personal data; dropped in intermediate.
+        meta: {pii: true}
+      - name: run_id
+        description: Ingestion run the value was last landed in (lineage).
+      - name: load_mode
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [full, incremental]
 
   - name: stg_dhis2__data_elements
     columns:
@@ -77,3 +102,24 @@ models:
     columns:
       - name: data_set_id
         data_tests: [unique, not_null]
+      - name: assigned_org_units
+        description: Number of org units the form is assigned to.
+
+  - name: stg_dhis2__data_set_org_units
+    description: Data set assignments, one row per (data set, assigned org unit).
+    columns:
+      - name: data_set_org_unit_key
+        data_tests: [unique, not_null]
+      - name: data_set_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__data_sets')
+                field: data_set_id
+      - name: org_unit_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__organisation_units')
+                field: org_unit_id

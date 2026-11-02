@@ -3,17 +3,21 @@
 ``hmis_pipeline`` (the deployed flow) runs three steps in order and stops at
 the first failure, so gold is never rebuilt from bad data:
 
-    1. ``hmis_ingestion``  DHIS2 -> raw/ + landing/ in Silo
+    1. ``hmis_ingestion``  DHIS2 -> landing/ in Silo, payloads AS RECEIVED
          a. snapshot metadata (data elements, org units, category option
-            combos, data sets)              -> raw JSON + landing Parquet
+            combos, data sets + assignments)  -> landing JSON, one per run
          b. for each enabled data set:
               plan requests (full window or incremental since last watermark)
-              -> extract data values in parallel  -> raw JSON (one object/request)
-              -> normalise, de-duplicate, enrich  -> landing Parquet per period
+              -> extract data values in parallel -> landing JSON, one per request
               -> advance the watermark
          c. write a run manifest to ``_runs/``
+       No transformation happens here: typing, de-duplication, hashing and
+       joins are all done by dbt.
     2. ``dbt build`` in dbt/lake       landing -> staging -> intermediate (Silo)
     3. ``dbt build`` in dbt/warehouse  intermediate -> gold marts (ClickHouse)
+       (+ ``dbt docs generate`` for both, served on :8085)
+
+A failed or crashed run emails the data team (``alerts`` in the config).
 
 Run locally:      python dataset_ingestion.py                (all three steps)
 Ingest only:      python dataset_ingestion.py --skip-dbt
@@ -30,24 +34,19 @@ import argparse
 from datetime import date
 from pathlib import Path
 
-import pandas as pd
 from prefect import flow, get_run_logger, task
 from prefect.cache_policies import NO_CACHE
 from prefect.task_runners import ThreadPoolTaskRunner
 
 from hmis import (
-    DATA_VALUE_KEY,
     DataLake,
     DbtError,
     DHIS2Client,
-    data_values_to_frame,
+    as_bool,
     date_windows,
-    enrich_data_values,
     load_config,
-    metadata_to_frame,
-    org_unit_hierarchy,
-    payload_to_records,
     run_dbt,
+    send_email,
     utc_now,
 )
 
@@ -90,7 +89,7 @@ def get_server_time(config_path: str) -> str:
 
 @task(retries=3, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="metadata-{entity_name}")
 def ingest_metadata(config_path: str, entity_name: str, run_id: str) -> dict:
-    """Snapshot one metadata resource to raw JSON and a landing Parquet table."""
+    """Land one metadata resource as received: a JSON array of DHIS2 objects."""
     logger = get_run_logger()
     cfg = load_config(config_path)
     entity = next(m for m in cfg["metadata"] if m["name"] == entity_name)
@@ -99,18 +98,11 @@ def ingest_metadata(config_path: str, entity_name: str, run_id: str) -> dict:
     lake = DataLake.from_config(lake_cfg)
 
     records = list(client.iter_metadata(entity["resource"], entity["fields"], entity.get("filters")))
-    raw_key = f"{lake_cfg['raw_prefix']}/metadata/{entity_name}/run_id={run_id}/{entity_name}.json.gz"
-    lake.put_json(raw_key, records)
+    key = f"{lake_cfg['landing_prefix']}/metadata/{entity_name}/run_id={run_id}/{entity_name}.json.gz"
+    lake.put_json(key, records)
 
-    df = metadata_to_frame(records)
-    if entity_name == "organisation_units" and not df.empty:
-        df = org_unit_hierarchy(df)
-    df["ingested_at"] = utc_now()
-    landing_key = f"{lake_cfg['landing_prefix']}/metadata/{entity_name}/{entity_name}.parquet"
-    lake.put_parquet(landing_key, df)
-
-    logger.info("%s: %d records -> %s", entity_name, len(df), lake.uri(landing_key))
-    return {"entity": entity_name, "rows": len(df), "raw_key": raw_key, "landing_key": landing_key}
+    logger.info("%s: %d records -> %s", entity_name, len(records), lake.uri(key))
+    return {"entity": entity_name, "records": len(records), "key": key}
 
 
 @task(cache_policy=NO_CACHE, task_run_name="plan-{dataset_key}")
@@ -147,9 +139,15 @@ def plan_requests(
     task_run_name="extract-{dataset_key}-{request_id}",
 )
 def extract_data_values(
-    config_path: str, dataset_key: str, request: dict, request_id: str, run_id: str
+    config_path: str, dataset_key: str, request: dict, request_id: str, run_id: str, mode: str
 ) -> dict:
-    """Call /api/dataValueSets once and land the untouched payload in raw/."""
+    """Call /api/dataValueSets once and land the payload untouched in landing/.
+
+    The object path carries what dbt needs to interpret it (hive-style
+    partitions): data set key and UID, run, and load mode. ``mode=full``
+    marks a complete snapshot of its window; staging uses that to drop values
+    deleted in DHIS2 since an earlier run.
+    """
     logger = get_run_logger()
     cfg = load_config(config_path)
     ds = _dataset_cfg(cfg, dataset_key)
@@ -164,65 +162,14 @@ def extract_data_values(
         last_updated=request.get("last_updated"),
         children=bool(ds.get("children", True)),
     )
-    raw_key = (
-        f"{cfg['datalake']['raw_prefix']}/data_values/dataset={dataset_key}"
-        f"/run_id={run_id}/{request_id}.json.gz"
+    key = (
+        f"{cfg['datalake']['landing_prefix']}/data_values/dataset={dataset_key}"
+        f"/data_set_id={ds['id']}/run_id={run_id}/mode={mode}/{request_id}.json.gz"
     )
-    lake.put_json(raw_key, {"request": request, **payload})
+    lake.put_json(key, payload)
     rows = len(payload.get("dataValues", []))
-    logger.info("%s [%s]: %d values", dataset_key, request_id, rows)
-    return {"raw_key": raw_key, "rows": rows}
-
-
-@task(retries=1, retry_delay_seconds=30, cache_policy=NO_CACHE, task_run_name="load-landing-{dataset_key}")
-def load_landing(config_path: str, dataset_key: str, raw_keys: list[str], mode: str) -> dict:
-    """Raw JSON -> typed, enriched Parquet partitioned by period.
-
-    full:        each touched period partition is overwritten.
-    incremental: changed values are upserted into existing partitions.
-    """
-    logger = get_run_logger()
-    cfg = load_config(config_path)
-    ds = _dataset_cfg(cfg, dataset_key)
-    lake_cfg = cfg["datalake"]
-    lake = DataLake.from_config(lake_cfg)
-
-    records: list[dict] = []
-    for key in raw_keys:
-        records.extend(payload_to_records(lake.get_json(key)))
-    df = data_values_to_frame(records)
-    if df.empty:
-        logger.info("%s: nothing new to load", dataset_key)
-        return {"dataset": dataset_key, "rows": 0, "partitions": []}
-
-    md_prefix = f"{lake_cfg['landing_prefix']}/metadata"
-    lookups = {
-        name: lake.get_parquet(f"{md_prefix}/{name}/{name}.parquet")
-        for name in ("data_elements", "category_option_combos", "organisation_units", "data_sets")
-        if lake.exists(f"{md_prefix}/{name}/{name}.parquet")
-    }
-    data_sets = lookups.get("data_sets", pd.DataFrame(columns=["id", "name"]))
-    ds_name = next(iter(data_sets.loc[data_sets["id"] == ds["id"], "name"]), None)
-    df = enrich_data_values(df, lookups, ds["id"], ds_name)
-
-    partitions = []
-    for period, part in df.groupby("period", sort=True):
-        key = f"{lake_cfg['landing_prefix']}/data_values/dataset={dataset_key}/period={period}/data.parquet"
-        if mode == "incremental" and lake.exists(key):
-            # New rows come last so they win the de-duplication.
-            part = pd.concat([lake.get_parquet(key), part], ignore_index=True)
-            part = part.drop_duplicates(subset=DATA_VALUE_KEY, keep="last")
-        lake.put_parquet(key, part.reset_index(drop=True))
-        partitions.append({"period": period, "rows": len(part), "key": key})
-
-    logger.info(
-        "%s: %d values across %d period partitions -> %s",
-        dataset_key,
-        len(df),
-        len(partitions),
-        lake.uri(f"{lake_cfg['landing_prefix']}/data_values/dataset={dataset_key}/"),
-    )
-    return {"dataset": dataset_key, "rows": len(df), "partitions": partitions}
+    logger.info("%s [%s]: %d values -> %s", dataset_key, request_id, rows, lake.uri(key))
+    return {"key": key, "rows": rows, "request": request}
 
 
 @task(cache_policy=NO_CACHE, task_run_name="watermark-{dataset_key}")
@@ -258,13 +205,7 @@ def dbt_build(config_path: str, project: str) -> dict:
     The one retry covers a lake or warehouse that was briefly unreachable.
     """
     logger = get_run_logger()
-    cfg = load_config(config_path)
-    transform = dict(cfg["transform"])
-    base = Path(config_path).parent
-    transform["projects"] = {
-        name: str(path if Path(path).is_absolute() else base / path)
-        for name, path in transform["projects"].items()
-    }
+    transform = _transform_cfg(config_path)
     try:
         # Skip dbt's "START" lines; the OK/PASS/WARN/ERROR line follows each one.
         summary = run_dbt(
@@ -276,6 +217,68 @@ def dbt_build(config_path: str, project: str) -> dict:
         raise
     logger.info("dbt build %s: %s in %ss", project, summary["counts"], summary["elapsed"])
     return summary
+
+
+def _transform_cfg(config_path: str) -> dict:
+    cfg = load_config(config_path)
+    transform = dict(cfg["transform"])
+    base = Path(config_path).parent
+    transform["projects"] = {
+        name: str(path if Path(path).is_absolute() else base / path)
+        for name, path in transform["projects"].items()
+    }
+    return transform
+
+
+@task(cache_policy=NO_CACHE, task_run_name="dbt-docs-{project}")
+def dbt_docs(config_path: str, project: str) -> str | None:
+    """Regenerate the dbt docs site (one self-contained HTML file).
+
+    Served by the `dbt-docs` container on http://localhost:8085. Docs are a
+    convenience, so a failure here is logged as a warning and does not fail
+    the pipeline.
+    """
+    logger = get_run_logger()
+    transform = _transform_cfg(config_path)
+    try:
+        run_dbt(transform, project, ["docs", "generate", "--static"])
+    except DbtError as exc:
+        logger.warning("dbt docs generate failed in %s: %s", project, exc)
+        return None
+    path = Path(transform["projects"][project]) / "target" / "static_index.html"
+    logger.info("dbt docs for %s -> %s", project, path)
+    return str(path)
+
+
+# --------------------------------------------------------------------------- #
+# Alerts
+# --------------------------------------------------------------------------- #
+def notify_failure(flow, flow_run, state) -> None:
+    """Flow hook: email the data team when a pipeline run fails or crashes."""
+    config_path = _resolve_config(flow_run.parameters.get("config_path", DEFAULT_CONFIG))
+    cfg = load_config(config_path)
+    alerts = cfg.get("alerts", {})
+    if not as_bool(alerts.get("enabled", False)):
+        return
+    url = f"{str(alerts.get('prefect_ui', '')).rstrip('/')}/runs/flow-run/{flow_run.id}"
+    params = {k: v for k, v in flow_run.parameters.items() if k != "config_path"}
+    subject = f"[HMIS pipeline] {state.type.value}: {flow.name} / {flow_run.name}"
+    body = "\n".join([
+        f"The HMIS pipeline run '{flow_run.name}' ended in state {state.name}.",
+        "",
+        f"Reason:      {state.message or 'no message'}",
+        f"Parameters:  {params or 'defaults'}",
+        f"Started:     {flow_run.start_time}",
+        f"Run in UI:   {url}",
+        "",
+        "Gold marts in ClickHouse were NOT rebuilt by this run; dashboards show",
+        "the data from the last successful run.",
+    ])
+    try:
+        send_email(alerts["email"], subject, body)
+        print(f"Alert email sent to {alerts['email']['to']}")
+    except Exception as exc:  # an alert failure must not hide the real failure
+        print(f"Could not send alert email: {exc}")
 
 
 # --------------------------------------------------------------------------- #
@@ -294,7 +297,7 @@ def ingest_dataset(
     run_id: str,
     watermark: str,
 ) -> dict:
-    """Extract -> raw -> landing -> watermark for a single DHIS2 data set."""
+    """Extract -> landing (as received) -> watermark for one DHIS2 data set."""
     today = date.fromisoformat(watermark[:10])
     effective_mode, requests_ = plan_requests(config_path, dataset_key, mode, lookback_months, today)
 
@@ -305,20 +308,20 @@ def ingest_dataset(
             req,
             req.get("end_date", "")[:7] or "incremental",  # window start may be in the prior month
             run_id,
+            effective_mode,
         )
         for req in requests_
     ]
     extracted = [f.result() for f in futures]
 
-    summary = load_landing(config_path, dataset_key, [e["raw_key"] for e in extracted], effective_mode)
-    update_watermark(config_path, dataset_key, watermark, run_id, effective_mode, summary["rows"])
+    values = sum(e["rows"] for e in extracted)
+    update_watermark(config_path, dataset_key, watermark, run_id, effective_mode, values)
     return {
         "dataset": dataset_key,
         "mode": effective_mode,
         "requests": len(requests_),
-        "values_extracted": sum(e["rows"] for e in extracted),
-        "rows_loaded": summary["rows"],
-        "partitions": len(summary["partitions"]),
+        "values_landed": values,
+        "objects": [e["key"] for e in extracted],
     }
 
 
@@ -329,7 +332,7 @@ def hmis_ingestion(
     datasets: list[str] | None = None,
     lookback_months: int | None = None,
 ) -> dict:
-    """Ingest HMIS (DHIS2) metadata and aggregate data values into MinIO.
+    """Land HMIS (DHIS2) metadata and aggregate data values in Silo, as received.
 
     Args:
         config_path: Path to ingestion_config.yml (relative to this file).
@@ -389,8 +392,8 @@ def hmis_ingestion(
     manifest_uri = write_manifest(config_path, run_id, manifest)
     for r in results:
         print(
-            f"{r['dataset']:<22} {r['mode']:<12} extracted={r['values_extracted']:<8} "
-            f"loaded={r['rows_loaded']:<8} partitions={r['partitions']}"
+            f"{r['dataset']:<22} {r['mode']:<12} requests={r['requests']:<3} "
+            f"values landed={r['values_landed']}"
         )
     print(f"Manifest: {manifest_uri}")
 
@@ -399,7 +402,12 @@ def hmis_ingestion(
     return manifest
 
 
-@flow(name="hmis-pipeline", log_prints=True)
+@flow(
+    name="hmis-pipeline",
+    log_prints=True,
+    on_failure=[notify_failure],
+    on_crashed=[notify_failure],
+)
 def hmis_pipeline(
     config_path: str = DEFAULT_CONFIG,
     mode: str | None = None,
@@ -413,6 +421,8 @@ def hmis_pipeline(
       1. ingestion       hmis_ingestion subflow (raises if any data set failed)
       2. dbt lake        landing -> staging -> intermediate, Parquet in Silo
       3. dbt warehouse   intermediate -> gold marts in ClickHouse
+      then the dbt docs site is regenerated (never fails the run).
+    A failed or crashed run sends an alert email (notify_failure).
 
     Args:
         config_path, mode, datasets, lookback_months: passed to ingestion.
@@ -433,6 +443,9 @@ def hmis_pipeline(
         summary = dbt_build(config_path, project)
         result["dbt"].append(summary)
         print(f"dbt {project:<10} {summary['counts']}  ({summary['elapsed']}s)")
+
+    if cfg["transform"].get("docs", True):
+        result["docs"] = [dbt_docs(config_path, project) for project in ("lake", "warehouse")]
     return result
 
 

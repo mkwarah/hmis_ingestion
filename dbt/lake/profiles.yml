@@ -22,6 +22,13 @@ hmis_lake:
       extensions:
         - httpfs
         - parquet
+        - json                      # landing holds DHIS2 payloads as received (JSON)
+      # plugins/hmis_pii.py hands the PII hashing salt (HMIS_HASH_SALT) to
+      # DuckDB as a session variable, so it never appears in SQL.
+      # Paths are relative to this folder: run dbt from here.
+      module_paths: [plugins]
+      plugins:
+        - module: hmis_pii
       settings:
         s3_endpoint: "{{ env_var('MINIO_ENDPOINT', 'localhost:9100') }}"
         s3_access_key_id: "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"

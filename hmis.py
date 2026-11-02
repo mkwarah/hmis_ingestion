@@ -5,9 +5,12 @@ reused from notebooks, tests or other flows:
 
 * ``load_config``      - YAML config loader with ``${ENV_VAR:-default}`` expansion
 * ``DHIS2Client``      - thin, retrying client for the DHIS2 Web API
-* ``DataLake``         - MinIO / S3 object-store wrapper (JSON, Parquet, state)
-* transform helpers    - turn raw DHIS2 payloads into tidy, enriched DataFrames
+* ``DataLake``         - MinIO / S3 object-store wrapper (JSON, state)
 * ``run_dbt``          - run a dbt command in the lake or warehouse project
+* ``send_email``       - plain SMTP email, used for pipeline alerts
+
+Ingestion lands DHIS2 payloads *as received*; every transformation (typing,
+de-duplication, hashing, joins) happens in dbt, not here.
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-import pandas as pd
 import requests
 import yaml
 from minio import Minio
@@ -31,16 +33,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 log = logging.getLogger(__name__)
-
-# Natural key of a DHIS2 aggregate data value.
-DATA_VALUE_KEY = [
-    "data_element_id",
-    "period",
-    "org_unit_id",
-    "category_option_combo_id",
-    "attribute_option_combo_id",
-]
-
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -171,9 +163,9 @@ class DHIS2Client:
     ) -> dict:
         """Full ``/api/dataValueSets`` payload for a data set.
 
-        The payload is returned untouched: DHIS2 hoists fields shared by every
-        value (e.g. ``attributeOptionCombo``) to the top level, and
-        ``payload_to_records`` puts them back on each value.
+        The payload is returned untouched and landed as is. DHIS2 hoists
+        fields shared by every value (e.g. ``attributeOptionCombo``) to the
+        top level; dbt staging puts them back on each value.
         """
         params: dict[str, Any] = {
             "dataSet": data_set,
@@ -271,14 +263,6 @@ class DataLake:
             data = gzip.decompress(data)
         return json.loads(data)
 
-    def put_parquet(self, key: str, df: pd.DataFrame) -> str:
-        buffer = io.BytesIO()
-        df.to_parquet(buffer, index=False, engine="pyarrow", compression="snappy")
-        return self.put_bytes(key, buffer.getvalue(), "application/vnd.apache.parquet")
-
-    def get_parquet(self, key: str) -> pd.DataFrame:
-        return pd.read_parquet(io.BytesIO(self.get_bytes(key)), engine="pyarrow")
-
     # -- incremental state -------------------------------------------------- #
     def read_state(self, key: str) -> dict | None:
         return self.get_json(key) if self.exists(key) else None
@@ -302,7 +286,7 @@ def date_windows(
     DHIS2 only returns periods that fall *entirely* inside startDate/endDate,
     so a week spanning two months would be missed by plain monthly windows.
     ``overlap_days`` extends each window backwards to catch those periods;
-    the resulting duplicates are removed at load time. Use ``chunk_months``
+    the resulting duplicates are removed in dbt staging. Use ``chunk_months``
     of 3/6/12 for quarterly, six-monthly or yearly data sets.
     """
     end_idx = end.year * 12 + end.month - 1
@@ -316,121 +300,6 @@ def date_windows(
         windows.append((start, stop))
         idx = nxt
     return windows
-
-
-def to_snake(name: str) -> str:
-    name = name.replace(".", "_")
-    name = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name)
-    return name.lower()
-
-
-def metadata_to_frame(records: list[dict]) -> pd.DataFrame:
-    """Flatten DHIS2 metadata objects (e.g. ``parent.id`` -> ``parent_id``)."""
-    df = pd.json_normalize(records) if records else pd.DataFrame()
-    df.columns = [to_snake(c) for c in df.columns]
-    return df
-
-
-def org_unit_hierarchy(org_units: pd.DataFrame) -> pd.DataFrame:
-    """Add ``ou_level_N`` name columns derived from each org unit's path."""
-    names = dict(zip(org_units["id"], org_units["name"].str.strip()))
-    paths = org_units["path"].fillna("").str.strip("/").str.split("/")
-    max_level = int(paths.map(len).max() or 0)
-    out = org_units.copy()
-    for level in range(1, max_level + 1):
-        out[f"ou_level_{level}"] = paths.map(
-            lambda p, i=level - 1: names.get(p[i]) if len(p) > i else None
-        )
-    return out
-
-
-def payload_to_records(payload: dict) -> list[dict]:
-    """``dataValues`` from a dataValueSets payload with hoisted fields restored."""
-    shared = {
-        k: payload[k]
-        for k in ("dataSet", "attributeOptionCombo", "period", "orgUnit")
-        if payload.get(k)
-    }
-    return [{**shared, **value} for value in payload.get("dataValues", [])]
-
-
-def data_values_to_frame(records: list[dict]) -> pd.DataFrame:
-    """Normalise raw ``dataValues`` into a typed, de-duplicated DataFrame."""
-    columns = {
-        "dataElement": "data_element_id",
-        "period": "period",
-        "orgUnit": "org_unit_id",
-        "categoryOptionCombo": "category_option_combo_id",
-        "attributeOptionCombo": "attribute_option_combo_id",
-        "value": "value",
-        "storedBy": "stored_by",
-        "created": "created",
-        "lastUpdated": "last_updated",
-        "comment": "comment",
-        "followup": "followup",
-    }
-    df = pd.DataFrame.from_records(records) if records else pd.DataFrame()
-    for src in columns:
-        if src not in df.columns:
-            df[src] = None
-    df = df[list(columns)].rename(columns=columns)
-
-    # Fixed dtypes so every period partition shares one Parquet schema.
-    for col in ("data_element_id", "period", "org_unit_id", "category_option_combo_id",
-                "attribute_option_combo_id", "value", "stored_by", "comment"):
-        df[col] = df[col].astype("string")
-    df["value_numeric"] = pd.to_numeric(df["value"], errors="coerce").astype("Float64")
-    for col in ("created", "last_updated"):
-        df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
-    df["followup"] = df["followup"].fillna(False).astype(bool)
-    return df.drop_duplicates(subset=DATA_VALUE_KEY, keep="last").reset_index(drop=True)
-
-
-def enrich_data_values(
-    df: pd.DataFrame,
-    lookups: dict[str, pd.DataFrame],
-    data_set_id: str,
-    data_set_name: str | None,
-) -> pd.DataFrame:
-    """Attach human-readable names and the org unit hierarchy to data values."""
-    out = df.copy()
-    if (de := lookups.get("data_elements")) is not None and not de.empty:
-        de_cols = [c for c in ("id", "name", "value_type", "aggregation_type") if c in de]
-        out = out.merge(
-            de[de_cols].rename(
-                columns={
-                    "id": "data_element_id",
-                    "name": "data_element_name",
-                    "value_type": "data_element_value_type",
-                    "aggregation_type": "data_element_aggregation_type",
-                }
-            ),
-            on="data_element_id",
-            how="left",
-        )
-    if (coc := lookups.get("category_option_combos")) is not None and not coc.empty:
-        out = out.merge(
-            coc[["id", "name"]].rename(
-                columns={"id": "category_option_combo_id", "name": "category_option_combo_name"}
-            ),
-            on="category_option_combo_id",
-            how="left",
-        )
-    if (ou := lookups.get("organisation_units")) is not None and not ou.empty:
-        ou_cols = ["id", "name", "level"] + [c for c in ou.columns if c.startswith("ou_level_")]
-        out = out.merge(
-            ou[ou_cols].rename(
-                columns={"id": "org_unit_id", "name": "org_unit_name", "level": "org_unit_level"}
-            ),
-            on="org_unit_id",
-            how="left",
-        )
-    if "org_unit_level" in out:
-        out["org_unit_level"] = out["org_unit_level"].astype("Int64")
-    out["data_set_id"] = data_set_id
-    out["data_set_name"] = data_set_name
-    out["ingested_at"] = utc_now()
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -512,3 +381,30 @@ def run_dbt(
     if returncode != 0:
         raise DbtError(f"dbt {' '.join(args)} failed in '{project}' (exit {returncode}): {counts}", summary)
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# Alerts: email
+# --------------------------------------------------------------------------- #
+def send_email(email_cfg: dict, subject: str, body: str) -> None:
+    """Send a plain-text email with the ``alerts.email`` config section.
+
+    Works with any SMTP server: Office 365 / Gmail (port 587, STARTTLS, user
+    and app password) or the local Mailpit test inbox (port 1025, no auth).
+    """
+    import smtplib
+    from email.message import EmailMessage
+
+    recipients = [r.strip() for r in str(email_cfg["to"]).split(",") if r.strip()]
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = email_cfg["from"]
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(body)
+
+    with smtplib.SMTP(email_cfg["smtp_host"], int(email_cfg["smtp_port"]), timeout=30) as smtp:
+        if as_bool(email_cfg.get("starttls", False)):
+            smtp.starttls()
+        if email_cfg.get("username"):
+            smtp.login(email_cfg["username"], email_cfg["password"])
+        smtp.send_message(msg, to_addrs=recipients)

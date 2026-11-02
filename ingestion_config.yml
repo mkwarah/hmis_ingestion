@@ -25,16 +25,16 @@ datalake:
   region: ${MINIO_REGION:-}
   bucket: ${MINIO_BUCKET:-hmis-datalake}
   # Layout inside the bucket:
-  #   raw/     - untouched API payloads (gzipped JSON), one object per request
-  #   landing/  - typed, enriched Parquet partitioned by dataset and period
-  #   _state/  - incremental watermarks;  _runs/ - per-run manifests
-  raw_prefix: raw/dhis2
+  #   landing/       - DHIS2 API payloads exactly as received (gzipped JSON),
+  #                    one object per request, every run kept. No transformation.
+  #   staging/ intermediate/ - written by dbt (dbt/lake), not by ingestion
+  #   _state/        - incremental watermarks;  _runs/ - per-run manifests
   landing_prefix: landing/dhis2
   state_prefix: _state/dhis2
   runs_prefix: _runs/dhis2
 
 ingestion:
-  # full        - re-pull the last `lookback_months` and overwrite those partitions
+  # full        - re-pull the last `lookback_months` (a fresh snapshot of them)
   # incremental - pull only values changed since the last successful run
   #               (falls back to full on the first run of a dataset)
   mode: incremental
@@ -59,8 +59,26 @@ transform:
   # Extra environment for dbt (MINIO_* and CLICKHOUSE_* are passed through).
   env:
     HMIS_DUCKDB_PATH: ${HMIS_DUCKDB_PATH:-~/hmis-data/hmis_lake.duckdb}
+  # After each build, regenerate the dbt docs site (served on :8085).
+  docs: true
 
-# Metadata snapshots, refreshed every run and used to enrich data values.
+# Email when a pipeline run fails or crashes (DHIS2 extract, dbt model or
+# dbt test). Defaults deliver to the local Mailpit inbox
+# (http://localhost:8025); set SMTP_* in .env for a real mail server, e.g.
+# Office 365: SMTP_HOST=smtp.office365.com SMTP_PORT=587 SMTP_STARTTLS=true.
+alerts:
+  enabled: ${ALERTS_ENABLED:-true}
+  prefect_ui: ${PREFECT_UI_URL:-http://localhost:4200}
+  email:
+    smtp_host: ${SMTP_HOST:-localhost}
+    smtp_port: ${SMTP_PORT:-1025}
+    starttls: ${SMTP_STARTTLS:-false}
+    username: ${SMTP_USERNAME:-}
+    password: ${SMTP_PASSWORD:-}
+    from: ${ALERT_EMAIL_FROM:-hmis-pipeline@localhost}
+    to: ${ALERT_EMAIL_TO:-data-team@localhost}
+
+# Metadata snapshots, landed as received every run; dbt joins them to values.
 metadata:
   - name: data_elements
     resource: dataElements
@@ -73,7 +91,9 @@ metadata:
     fields: id,code,name,lastUpdated
   - name: data_sets
     resource: dataSets
-    fields: id,code,name,periodType,lastUpdated
+    # organisationUnits = the facilities assigned to report the form, the
+    # denominator of the reporting rate.
+    fields: id,code,name,periodType,lastUpdated,organisationUnits[id]
 
 # Aggregate data sets to ingest. `org_unit` is the root of the hierarchy to
 # pull; with `children: true` all descendants are included. `chunk_months`
@@ -93,6 +113,13 @@ datasets:
     id: Nyh6laLdBEJ
     org_unit: ImspTQPwCqd
     children: true
+    enabled: true
+  # Yearly population estimates: denominators for coverage indicators.
+  - key: population
+    id: aLpVgfXiz0f
+    org_unit: ImspTQPwCqd
+    children: true
+    chunk_months: 12             # one request per calendar year
     enabled: true
   - key: art_monthly_summary
     id: lyLU2wR22tC

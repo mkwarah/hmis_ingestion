@@ -1,55 +1,91 @@
 version: 2
 
-# The landing zone: landing Parquet written to Silo by the Prefect pipeline
-# (dataset_ingestion.py). dbt-duckdb reads each table through
-# `external_location`, so `{{ source('landing', 'data_values') }}` becomes a
-# read_parquet() call against s3://hmis-datalake/...
+# The landing zone: DHIS2 API payloads exactly as received, written by the
+# Prefect pipeline (dataset_ingestion.py). Nothing is transformed on the way
+# in, and every run is kept, so landing is the replayable source of truth.
+#
+# Each source reads the gzipped JSON with an explicit column list: this is the
+# DATA CONTRACT between DHIS2 and the lake. Fields DHIS2 adds later are
+# ignored; a field that disappears arrives as NULL and the staging tests catch
+# it. Folder names (dataset=…/run_id=…/mode=…) become columns through
+# hive_partitioning. `formatter: template` stops dbt-duckdb from treating the
+# braces of the column list as Python format placeholders.
 
 sources:
   - name: landing
-    description: Landing layer of the HMIS data lake in Silo, loaded from the DHIS2 demo by Prefect.
+    description: >
+      Landing layer of the HMIS data lake in Silo: DHIS2 Web API payloads as
+      received (gzipped JSON), one object per API request, all runs kept.
     tables:
       - name: data_values
         description: >
-          Aggregate data values, one Parquet file per data set and period
-          (dataset=<key>/period=<period>/data.parquet). Already carries names
-          looked up at load time; staging keeps only IDs and re-joins current
-          metadata in the intermediate layer.
+          /api/dataValueSets payloads, one per request:
+          landing/dhis2/data_values/dataset=<key>/data_set_id=<uid>/run_id=<ts>/mode=<full|incremental>/<request>.json.gz.
+          DHIS2 may hoist fields shared by every value (period, orgUnit,
+          attributeOptionCombo) to the top of the payload.
         meta:
-          # hive_partitioning off: the files already contain `period`, and the
-          # folder name would add a clashing second one. filename=true keeps the
-          # source object path for lineage.
+          formatter: template     # $-placeholders; braces in the column contract stay literal
           external_location: >-
-            read_parquet('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/data_values/dataset=*/period=*/data.parquet',
-                         union_by_name = true, hive_partitioning = false, filename = true)
-        loaded_at_field: ingested_at
-        freshness:
-          warn_after: {count: 2, period: day}
-          error_after: {count: 7, period: day}
+            read_json('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/data_values/dataset=*/data_set_id=*/run_id=*/mode=*/*.json.gz',
+              format = 'auto', hive_partitioning = true, filename = true,
+              columns = {
+                'dataSet': 'VARCHAR', 'period': 'VARCHAR', 'orgUnit': 'VARCHAR',
+                'attributeOptionCombo': 'VARCHAR',
+                'dataValues': 'STRUCT(dataElement VARCHAR, period VARCHAR, orgUnit VARCHAR,
+                                      categoryOptionCombo VARCHAR, attributeOptionCombo VARCHAR,
+                                      value VARCHAR, storedBy VARCHAR, created VARCHAR,
+                                      lastUpdated VARCHAR, comment VARCHAR, followup BOOLEAN)[]'
+              })
         columns:
-          - name: data_element_id
-          - name: period
-          - name: org_unit_id
-          - name: category_option_combo_id
-          - name: attribute_option_combo_id
-          - name: value
+          - name: dataValues
+            description: The values. storedBy (user name) and comment (free text) are personal data.
+            meta: {pii: [storedBy, comment]}
 
       - name: data_elements
-        description: Snapshot of DHIS2 data elements (what is counted).
+        description: /api/dataElements snapshot per run (JSON array of objects).
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/data_elements/data_elements.parquet')"
+          formatter: template     # $-placeholders; braces in the column contract stay literal
+          external_location: >-
+            read_json('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/metadata/data_elements/run_id=*/data_elements.json.gz',
+              format = 'array', hive_partitioning = true,
+              columns = {
+                'id': 'VARCHAR', 'code': 'VARCHAR', 'name': 'VARCHAR', 'shortName': 'VARCHAR',
+                'valueType': 'VARCHAR', 'aggregationType': 'VARCHAR', 'domainType': 'VARCHAR',
+                'lastUpdated': 'VARCHAR'
+              })
 
       - name: organisation_units
-        description: Snapshot of DHIS2 organisation units (country, district, chiefdom, facility).
+        description: /api/organisationUnits snapshot per run.
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/organisation_units/organisation_units.parquet')"
+          formatter: template     # $-placeholders; braces in the column contract stay literal
+          external_location: >-
+            read_json('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/metadata/organisation_units/run_id=*/organisation_units.json.gz',
+              format = 'array', hive_partitioning = true,
+              columns = {
+                'id': 'VARCHAR', 'code': 'VARCHAR', 'name': 'VARCHAR', 'shortName': 'VARCHAR',
+                'level': 'INTEGER', 'path': 'VARCHAR', 'parent': 'STRUCT(id VARCHAR)',
+                'openingDate': 'VARCHAR', 'closedDate': 'VARCHAR', 'lastUpdated': 'VARCHAR'
+              })
 
       - name: category_option_combos
-        description: Snapshot of disaggregations, e.g. "Fixed, <1y".
+        description: /api/categoryOptionCombos snapshot per run.
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/category_option_combos/category_option_combos.parquet')"
+          formatter: template     # $-placeholders; braces in the column contract stay literal
+          external_location: >-
+            read_json('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/metadata/category_option_combos/run_id=*/category_option_combos.json.gz',
+              format = 'array', hive_partitioning = true,
+              columns = {
+                'id': 'VARCHAR', 'code': 'VARCHAR', 'name': 'VARCHAR', 'lastUpdated': 'VARCHAR'
+              })
 
       - name: data_sets
-        description: Snapshot of DHIS2 data sets (reporting forms) and their period type.
+        description: /api/dataSets snapshot per run, with the org units assigned to each form.
         meta:
-          external_location: "read_parquet('{{ env_var(\"HMIS_LAKE_BUCKET\", \"s3://hmis-datalake\") }}/landing/dhis2/metadata/data_sets/data_sets.parquet')"
+          formatter: template     # $-placeholders; braces in the column contract stay literal
+          external_location: >-
+            read_json('{{ env_var("HMIS_LAKE_BUCKET", "s3://hmis-datalake") }}/landing/dhis2/metadata/data_sets/run_id=*/data_sets.json.gz',
+              format = 'array', hive_partitioning = true,
+              columns = {
+                'id': 'VARCHAR', 'code': 'VARCHAR', 'name': 'VARCHAR', 'periodType': 'VARCHAR',
+                'lastUpdated': 'VARCHAR', 'organisationUnits': 'STRUCT(id VARCHAR)[]'
+              })

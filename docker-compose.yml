@@ -5,6 +5,8 @@
 #     ClickHouse  HTTP   :8124   native  :9010   play UI http://localhost:8124/play
 #     Prefect     UI + API       http://localhost:4200
 #     Metabase    dashboards     http://localhost:3010
+#     dbt docs    lineage, models http://localhost:8085
+#     Mailpit     alert inbox    http://localhost:8025  (SMTP :1025)
 #
 # Host ports are shifted from the usual ones (9000/9001, 8123/9000) so this
 # stack can run next to another MinIO and ClickHouse on the same machine.
@@ -94,6 +96,29 @@ services:
       JAVA_TIMEZONE: Africa/Kigali
     volumes:
       - metabase-data:/metabase-data
+
+  # dbt docs site: model descriptions, columns, tests and the lineage graph
+  # for both dbt projects. The pipeline regenerates the pages after every
+  # successful build (dbt docs generate --static); nginx just serves them.
+  dbt-docs:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    ports:
+      - "8085:80"
+    volumes:
+      - ./docs/index.html:/usr/share/nginx/html/index.html:ro
+      - ./dbt/lake/target:/usr/share/nginx/html/lake:ro
+      - ./dbt/warehouse/target:/usr/share/nginx/html/warehouse:ro
+
+  # Local test mail server: catches the pipeline's alert emails so they can
+  # be seen at http://localhost:8025 without a real mail account. Point SMTP_*
+  # in .env at a real server to send them for real.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    restart: unless-stopped
+    ports:
+      - "8025:8025"      # web inbox
+      - "1025:1025"      # SMTP
 
 volumes:
   silo-data:

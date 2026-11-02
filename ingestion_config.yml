@@ -1,0 +1,86 @@
+# HMIS ingestion configuration
+# ---------------------------------------------------------------------------
+# Values of the form ${VAR:-default} are read from the environment (or a .env
+# file next to this config). Keep real credentials out of this file.
+
+source:
+  name: dhis2_demo
+  system: dhis2
+  # Public DHIS2 demo (Sierra Leone database). The play server rotates
+  # versions; if this URL stops working, pick a current one from
+  # https://play.dhis2.org and set DHIS2_BASE_URL.
+  base_url: ${DHIS2_BASE_URL:-https://play.im.dhis2.org/stable-2-43-2-1}
+  username: ${DHIS2_USERNAME:-admin}
+  password: ${DHIS2_PASSWORD:-district}
+  timeout_seconds: 180
+  max_retries: 5
+  page_size: 1000
+
+# Silo (community fork of MinIO) or any S3-compatible store.
+datalake:
+  endpoint: ${MINIO_ENDPOINT:-localhost:9000}   # host:port, no scheme
+  access_key: ${MINIO_ACCESS_KEY:-minioadmin}
+  secret_key: ${MINIO_SECRET_KEY:-minioadmin}
+  secure: ${MINIO_SECURE:-false}                # true when MinIO is behind TLS
+  region: ${MINIO_REGION:-}
+  bucket: ${MINIO_BUCKET:-hmis-datalake}
+  # Layout inside the bucket:
+  #   raw/     - untouched API payloads (gzipped JSON), one object per request
+  #   bronze/  - typed, enriched Parquet partitioned by dataset and period
+  #   _state/  - incremental watermarks;  _runs/ - per-run manifests
+  raw_prefix: raw/dhis2
+  bronze_prefix: bronze/dhis2
+  state_prefix: _state/dhis2
+  runs_prefix: _runs/dhis2
+
+ingestion:
+  # full        - re-pull the last `lookback_months` and overwrite those partitions
+  # incremental - pull only values changed since the last successful run
+  #               (falls back to full on the first run of a dataset)
+  mode: incremental
+  lookback_months: 12
+  # Full loads are split into calendar-month requests. Each window starts
+  # `overlap_days` early so weekly periods crossing a month boundary are not
+  # dropped (DHIS2 only returns periods wholly inside the window).
+  chunk_months: 1
+  overlap_days: 7
+
+# Metadata snapshots, refreshed every run and used to enrich data values.
+metadata:
+  - name: data_elements
+    resource: dataElements
+    fields: id,code,name,shortName,valueType,aggregationType,domainType,lastUpdated
+  - name: organisation_units
+    resource: organisationUnits
+    fields: id,code,name,shortName,level,path,parent[id],openingDate,closedDate,lastUpdated
+  - name: category_option_combos
+    resource: categoryOptionCombos
+    fields: id,code,name,lastUpdated
+  - name: data_sets
+    resource: dataSets
+    fields: id,code,name,periodType,lastUpdated
+
+# Aggregate data sets to ingest. `org_unit` is the root of the hierarchy to
+# pull; with `children: true` all descendants are included. `chunk_months`
+# can be overridden per data set (e.g. 3 for quarterly, 12 for yearly).
+datasets:
+  - key: child_health
+    id: BfMAe6Itzgt
+    org_unit: ImspTQPwCqd        # Sierra Leone (national)
+    children: true
+    enabled: true
+  - key: reproductive_health
+    id: QX4ZTUbOt3a
+    org_unit: ImspTQPwCqd
+    children: true
+    enabled: true
+  - key: idsr_weekly
+    id: Nyh6laLdBEJ
+    org_unit: ImspTQPwCqd
+    children: true
+    enabled: true
+  - key: art_monthly_summary
+    id: lyLU2wR22tC
+    org_unit: ImspTQPwCqd
+    children: true
+    enabled: false

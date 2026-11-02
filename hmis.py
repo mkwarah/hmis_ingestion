@@ -1,0 +1,432 @@
+"""Base building blocks for HMIS ingestion.
+
+Everything here is orchestration-agnostic (no Prefect imports), so it can be
+reused from notebooks, tests or other flows:
+
+* ``load_config``      - YAML config loader with ``${ENV_VAR:-default}`` expansion
+* ``DHIS2Client``      - thin, retrying client for the DHIS2 Web API
+* ``DataLake``         - MinIO / S3 object-store wrapper (JSON, Parquet, state)
+* transform helpers    - turn raw DHIS2 payloads into tidy, enriched DataFrames
+"""
+
+from __future__ import annotations
+
+import gzip
+import io
+import json
+import logging
+import os
+import re
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Iterator
+
+import pandas as pd
+import requests
+import yaml
+from minio import Minio
+from minio.error import S3Error
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+log = logging.getLogger(__name__)
+
+# Natural key of a DHIS2 aggregate data value.
+DATA_VALUE_KEY = [
+    "data_element_id",
+    "period",
+    "org_unit_id",
+    "category_option_combo_id",
+    "attribute_option_combo_id",
+]
+
+
+# --------------------------------------------------------------------------- #
+# Configuration
+# --------------------------------------------------------------------------- #
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env(value: Any) -> Any:
+    """Recursively replace ``${VAR}`` / ``${VAR:-default}`` with env values."""
+    if isinstance(value, dict):
+        return {k: _expand_env(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_env(v) for v in value]
+    if isinstance(value, str):
+
+        def _sub(match: re.Match) -> str:
+            name, default = match.group(1), match.group(2)
+            resolved = os.environ.get(name, default)
+            if resolved is None:
+                raise KeyError(f"Environment variable '{name}' is not set and has no default")
+            return resolved
+
+        return _ENV_PATTERN.sub(_sub, value)
+    return value
+
+
+def as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def load_config(path: str | Path) -> dict:
+    """Load the ingestion YAML config, expanding environment variables.
+
+    A ``.env`` file next to the config is loaded first when python-dotenv is
+    installed, so local secrets never need to live in the YAML.
+    """
+    path = Path(path)
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(path.parent / ".env")
+    except ImportError:
+        pass
+    with path.open(encoding="utf-8") as fh:
+        return _expand_env(yaml.safe_load(fh))
+
+
+# --------------------------------------------------------------------------- #
+# Source: DHIS2 Web API
+# --------------------------------------------------------------------------- #
+class DHIS2Client:
+    """Minimal DHIS2 Web API client with connection pooling and HTTP retries."""
+
+    def __init__(
+        self,
+        base_url: str,
+        username: str,
+        password: str,
+        timeout: int = 180,
+        max_retries: int = 5,
+        page_size: int = 1000,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api = f"{self.base_url}/api"
+        self.timeout = timeout
+        self.page_size = page_size
+
+        retry = Retry(
+            total=max_retries,
+            backoff_factor=2,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET"}),
+            raise_on_status=False,
+        )
+        self.session = requests.Session()
+        self.session.auth = (username, password)
+        self.session.headers.update({"Accept": "application/json"})
+        self.session.mount("https://", HTTPAdapter(max_retries=retry))
+        self.session.mount("http://", HTTPAdapter(max_retries=retry))
+
+    @classmethod
+    def from_config(cls, source_cfg: dict) -> "DHIS2Client":
+        return cls(
+            base_url=source_cfg["base_url"],
+            username=source_cfg["username"],
+            password=source_cfg["password"],
+            timeout=int(source_cfg.get("timeout_seconds", 180)),
+            max_retries=int(source_cfg.get("max_retries", 5)),
+            page_size=int(source_cfg.get("page_size", 1000)),
+        )
+
+    def get(self, endpoint: str, params: dict | None = None) -> dict:
+        url = f"{self.api}/{endpoint.lstrip('/')}"
+        response = self.session.get(url, params=params, timeout=self.timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def server_time(self) -> str:
+        """Server clock, used as the incremental watermark (avoids clock skew)."""
+        return self.get("system/info")["serverDate"]
+
+    def iter_metadata(
+        self, resource: str, fields: str, filters: list[str] | None = None
+    ) -> Iterator[dict]:
+        """Yield every object of a metadata resource, following the pager."""
+        page = 1
+        while True:
+            params: dict[str, Any] = {"fields": fields, "page": page, "pageSize": self.page_size}
+            if filters:
+                params["filter"] = filters
+            payload = self.get(f"{resource}.json", params)
+            yield from payload.get(resource, [])
+            if page >= payload.get("pager", {}).get("pageCount", 1):
+                break
+            page += 1
+
+    def get_data_values(
+        self,
+        data_set: str,
+        org_unit: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        last_updated: str | None = None,
+        children: bool = True,
+    ) -> dict:
+        """Full ``/api/dataValueSets`` payload for a data set.
+
+        The payload is returned untouched: DHIS2 hoists fields shared by every
+        value (e.g. ``attributeOptionCombo``) to the top level, and
+        ``payload_to_records`` puts them back on each value.
+        """
+        params: dict[str, Any] = {
+            "dataSet": data_set,
+            "orgUnit": org_unit,
+            "children": str(children).lower(),
+        }
+        if start_date:
+            params["startDate"] = start_date.isoformat()
+        if end_date:
+            params["endDate"] = end_date.isoformat()
+        if last_updated:
+            params["lastUpdated"] = last_updated
+        return self.get("dataValueSets.json", params)
+
+
+# --------------------------------------------------------------------------- #
+# Sink: MinIO / S3 data lake
+# --------------------------------------------------------------------------- #
+class DataLake:
+    """Object-store wrapper. Works with MinIO and any S3-compatible endpoint."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        access_key: str,
+        secret_key: str,
+        bucket: str,
+        secure: bool = False,
+        region: str | None = None,
+    ) -> None:
+        self.client = Minio(
+            endpoint, access_key=access_key, secret_key=secret_key, secure=secure, region=region
+        )
+        self.bucket = bucket
+
+    @classmethod
+    def from_config(cls, lake_cfg: dict) -> "DataLake":
+        return cls(
+            endpoint=lake_cfg["endpoint"],
+            access_key=lake_cfg["access_key"],
+            secret_key=lake_cfg["secret_key"],
+            bucket=lake_cfg["bucket"],
+            secure=as_bool(lake_cfg.get("secure", False)),
+            region=lake_cfg.get("region") or None,
+        )
+
+    def uri(self, key: str) -> str:
+        return f"s3://{self.bucket}/{key}"
+
+    def ensure_bucket(self) -> None:
+        if not self.client.bucket_exists(self.bucket):
+            self.client.make_bucket(self.bucket)
+            log.info("Created bucket %s", self.bucket)
+
+    # -- primitives --------------------------------------------------------- #
+    def put_bytes(self, key: str, data: bytes, content_type: str) -> str:
+        self.client.put_object(
+            self.bucket, key, io.BytesIO(data), length=len(data), content_type=content_type
+        )
+        return key
+
+    def get_bytes(self, key: str) -> bytes:
+        response = self.client.get_object(self.bucket, key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    def exists(self, key: str) -> bool:
+        try:
+            self.client.stat_object(self.bucket, key)
+            return True
+        except S3Error as exc:
+            if exc.code in {"NoSuchKey", "NoSuchObject", "ResourceNotFound"}:
+                return False
+            raise
+
+    def list_keys(self, prefix: str) -> list[str]:
+        return [
+            obj.object_name
+            for obj in self.client.list_objects(self.bucket, prefix=prefix, recursive=True)
+        ]
+
+    # -- formats ------------------------------------------------------------ #
+    def put_json(self, key: str, obj: Any) -> str:
+        data = json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8")
+        if key.endswith(".gz"):
+            return self.put_bytes(key, gzip.compress(data), "application/gzip")
+        return self.put_bytes(key, data, "application/json")
+
+    def get_json(self, key: str) -> Any:
+        data = self.get_bytes(key)
+        if key.endswith(".gz"):
+            data = gzip.decompress(data)
+        return json.loads(data)
+
+    def put_parquet(self, key: str, df: pd.DataFrame) -> str:
+        buffer = io.BytesIO()
+        df.to_parquet(buffer, index=False, engine="pyarrow", compression="snappy")
+        return self.put_bytes(key, buffer.getvalue(), "application/vnd.apache.parquet")
+
+    def get_parquet(self, key: str) -> pd.DataFrame:
+        return pd.read_parquet(io.BytesIO(self.get_bytes(key)), engine="pyarrow")
+
+    # -- incremental state -------------------------------------------------- #
+    def read_state(self, key: str) -> dict | None:
+        return self.get_json(key) if self.exists(key) else None
+
+    def write_state(self, key: str, state: dict) -> str:
+        return self.put_json(key, state)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def date_windows(
+    end: date, lookback_months: int, chunk_months: int = 1, overlap_days: int = 0
+) -> list[tuple[date, date]]:
+    """Calendar-aligned request windows covering ``lookback_months`` up to ``end``.
+
+    DHIS2 only returns periods that fall *entirely* inside startDate/endDate,
+    so a week spanning two months would be missed by plain monthly windows.
+    ``overlap_days`` extends each window backwards to catch those periods;
+    the resulting duplicates are removed at load time. Use ``chunk_months``
+    of 3/6/12 for quarterly, six-monthly or yearly data sets.
+    """
+    end_idx = end.year * 12 + end.month - 1
+    idx = end_idx - lookback_months + 1
+    idx -= idx % chunk_months  # align to Jan / Apr / Jul / Oct ...
+    windows = []
+    while idx <= end_idx:
+        nxt = idx + chunk_months
+        start = date(idx // 12, idx % 12 + 1, 1) - timedelta(days=overlap_days)
+        stop = date(nxt // 12, nxt % 12 + 1, 1) - timedelta(days=1)
+        windows.append((start, stop))
+        idx = nxt
+    return windows
+
+
+def to_snake(name: str) -> str:
+    name = name.replace(".", "_")
+    name = re.sub(r"(?<=[a-z0-9])([A-Z])", r"_\1", name)
+    return name.lower()
+
+
+def metadata_to_frame(records: list[dict]) -> pd.DataFrame:
+    """Flatten DHIS2 metadata objects (e.g. ``parent.id`` -> ``parent_id``)."""
+    df = pd.json_normalize(records) if records else pd.DataFrame()
+    df.columns = [to_snake(c) for c in df.columns]
+    return df
+
+
+def org_unit_hierarchy(org_units: pd.DataFrame) -> pd.DataFrame:
+    """Add ``ou_level_N`` name columns derived from each org unit's path."""
+    names = dict(zip(org_units["id"], org_units["name"].str.strip()))
+    paths = org_units["path"].fillna("").str.strip("/").str.split("/")
+    max_level = int(paths.map(len).max() or 0)
+    out = org_units.copy()
+    for level in range(1, max_level + 1):
+        out[f"ou_level_{level}"] = paths.map(
+            lambda p, i=level - 1: names.get(p[i]) if len(p) > i else None
+        )
+    return out
+
+
+def payload_to_records(payload: dict) -> list[dict]:
+    """``dataValues`` from a dataValueSets payload with hoisted fields restored."""
+    shared = {
+        k: payload[k]
+        for k in ("dataSet", "attributeOptionCombo", "period", "orgUnit")
+        if payload.get(k)
+    }
+    return [{**shared, **value} for value in payload.get("dataValues", [])]
+
+
+def data_values_to_frame(records: list[dict]) -> pd.DataFrame:
+    """Normalise raw ``dataValues`` into a typed, de-duplicated DataFrame."""
+    columns = {
+        "dataElement": "data_element_id",
+        "period": "period",
+        "orgUnit": "org_unit_id",
+        "categoryOptionCombo": "category_option_combo_id",
+        "attributeOptionCombo": "attribute_option_combo_id",
+        "value": "value",
+        "storedBy": "stored_by",
+        "created": "created",
+        "lastUpdated": "last_updated",
+        "comment": "comment",
+        "followup": "followup",
+    }
+    df = pd.DataFrame.from_records(records) if records else pd.DataFrame()
+    for src in columns:
+        if src not in df.columns:
+            df[src] = None
+    df = df[list(columns)].rename(columns=columns)
+
+    # Fixed dtypes so every period partition shares one Parquet schema.
+    for col in ("data_element_id", "period", "org_unit_id", "category_option_combo_id",
+                "attribute_option_combo_id", "value", "stored_by", "comment"):
+        df[col] = df[col].astype("string")
+    df["value_numeric"] = pd.to_numeric(df["value"], errors="coerce").astype("Float64")
+    for col in ("created", "last_updated"):
+        df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+    df["followup"] = df["followup"].fillna(False).astype(bool)
+    return df.drop_duplicates(subset=DATA_VALUE_KEY, keep="last").reset_index(drop=True)
+
+
+def enrich_data_values(
+    df: pd.DataFrame,
+    lookups: dict[str, pd.DataFrame],
+    data_set_id: str,
+    data_set_name: str | None,
+) -> pd.DataFrame:
+    """Attach human-readable names and the org unit hierarchy to data values."""
+    out = df.copy()
+    if (de := lookups.get("data_elements")) is not None and not de.empty:
+        de_cols = [c for c in ("id", "name", "value_type", "aggregation_type") if c in de]
+        out = out.merge(
+            de[de_cols].rename(
+                columns={
+                    "id": "data_element_id",
+                    "name": "data_element_name",
+                    "value_type": "data_element_value_type",
+                    "aggregation_type": "data_element_aggregation_type",
+                }
+            ),
+            on="data_element_id",
+            how="left",
+        )
+    if (coc := lookups.get("category_option_combos")) is not None and not coc.empty:
+        out = out.merge(
+            coc[["id", "name"]].rename(
+                columns={"id": "category_option_combo_id", "name": "category_option_combo_name"}
+            ),
+            on="category_option_combo_id",
+            how="left",
+        )
+    if (ou := lookups.get("organisation_units")) is not None and not ou.empty:
+        ou_cols = ["id", "name", "level"] + [c for c in ou.columns if c.startswith("ou_level_")]
+        out = out.merge(
+            ou[ou_cols].rename(
+                columns={"id": "org_unit_id", "name": "org_unit_name", "level": "org_unit_level"}
+            ),
+            on="org_unit_id",
+            how="left",
+        )
+    if "org_unit_level" in out:
+        out["org_unit_level"] = out["org_unit_level"].astype("Int64")
+    out["data_set_id"] = data_set_id
+    out["data_set_name"] = data_set_name
+    out["ingested_at"] = utc_now()
+    return out

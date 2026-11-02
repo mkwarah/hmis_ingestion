@@ -1,0 +1,22 @@
+# Local Silo data lake for development.
+#   docker compose up -d     -> S3 API on :9000, web console on http://localhost:9001
+#
+# Silo (https://github.com/pgsty/silo) is the community-maintained fork of
+# MinIO, which was archived upstream in 2026. It is protocol- and
+# on-disk-compatible with MinIO, so the `minio` Python client and the
+# MINIO_* variables keep working unchanged.
+services:
+  silo:
+    image: pgsty/silo:RELEASE.2026-10-26T00-00-00Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - silo-data:/data
+
+volumes:
+  silo-data:

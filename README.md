@@ -1,5 +1,11 @@
 # HMIS data ingestion (DHIS2 → Silo/MinIO) with Prefect
 
+```
+DHIS2 ─Prefect─▶ Silo (data lake)                                   ClickHouse (warehouse)
+                 raw/ → bronze/ (landing) → staging/ → intermediate/ ─▶ gold marts
+                 └─ Prefect ─┘             └─ dbt/lake (DuckDB) ─┘      └ dbt/warehouse
+```
+
 End-to-end pipeline that pulls aggregate HMIS data from the public DHIS2 demo
 and lands it in a Silo data lake. Silo is the community fork of MinIO and
 speaks the same S3 API, so the code uses the standard `minio` client.
@@ -10,8 +16,11 @@ speaks the same S3 API, so the code uses the standard `minio` client.
 | `dataset_ingestion.py` | Prefect flows and tasks (extract → raw → bronze → watermark) |
 | `ingestion_config.yml` | Source, data lake, metadata and dataset settings |
 | `prefect.yaml` | Deployments: daily incremental, weekly full refresh, manual backfill |
-| `docker-compose.yml` | Local Silo for development |
+| `docker-compose.yml` | Local Silo (lake) and ClickHouse (warehouse) for development |
 | `.env.example` | Environment variables (copy to `.env`) |
+| `dbt/lake/` | dbt + DuckDB: landing → staging → intermediate, written to Silo as Parquet |
+| `dbt/warehouse/` | dbt + ClickHouse: gold marts read from the lake's intermediate layer |
+| `clickhouse/` | ClickHouse config: `silo` named collection and user grant |
 
 ## Data lake layout (bucket `hmis-datalake`)
 

@@ -1,9 +1,12 @@
-# Local Silo data lake for development.
-#   docker compose up -d     -> S3 API on :9100, web console on http://localhost:9101
+# Local data platform for development: Silo (data lake) + ClickHouse (warehouse).
+#   docker compose up -d
+#     Silo        S3 API :9100   console http://localhost:9101
+#     ClickHouse  HTTP   :8124   native  :9010   play UI http://localhost:8124/play
 #
-# Host ports 9100/9101 (not the usual 9000/9001) so this stack can run next
-# to another MinIO on the same machine. Inside the container Silo still
-# listens on 9000/9001.
+# Host ports are shifted from the usual ones (9000/9001, 8123/9000) so this
+# stack can run next to another MinIO and ClickHouse on the same machine.
+# Inside the compose network the services use their normal ports, and
+# ClickHouse reaches Silo at http://silo:9000.
 #
 # Silo (https://github.com/pgsty/silo) is the community-maintained fork of
 # MinIO, which was archived upstream in 2026. It is protocol- and
@@ -26,5 +29,35 @@ services:
     volumes:
       - silo-data:/data
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.8
+    restart: unless-stopped
+    depends_on:
+      - silo
+    ports:
+      - "8124:8123"
+      - "9010:9000"
+    environment:
+      # Must match the user tag in clickhouse/users.d/hmis.xml
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-hmis}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-hmis}
+      CLICKHOUSE_DB: gold
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      # Read by clickhouse/config.d/silo.xml (named collection `silo`)
+      SILO_URL: http://silo:9000/${MINIO_BUCKET:-hmis-datalake}/
+      SILO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      SILO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      # Mount the file, not the folder: config.d already holds the image's
+      # docker_related_config.xml (listen on all interfaces).
+      - ./clickhouse/config.d/silo.xml:/etc/clickhouse-server/config.d/silo.xml:ro
+      - ./clickhouse/users.d/hmis.xml:/etc/clickhouse-server/users.d/hmis.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
 volumes:
   silo-data:
+  clickhouse-data:

@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: dim_org_unit
+    description: Organisation units with country, district, chiefdom and facility.
+    columns:
+      - name: org_unit_id
+        data_tests: [unique, not_null]
+      - name: org_unit_name
+        data_tests: [not_null]
+
+  - name: fct_monthly_indicators_district
+    description: >
+      Monthly totals per district for monthly data sets.
+      Grain: data set x month x district x data element x disaggregation.
+    columns:
+      - name: district_name
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_org_unit')
+                field: district_name
+      - name: value
+        data_tests: [not_null]
+
+  - name: fct_weekly_idsr_district
+    description: >
+      Weekly IDSR totals per district, ISO weeks only.
+      Grain: week x district x data element x disaggregation.
+    columns:
+      - name: week_start
+        description: Monday the ISO week starts on.
+      - name: value
+        data_tests: [not_null]
+
+  - name: fct_reporting_monthly_district
+    description: Facilities reporting per monthly data set, month and district (proxy rate).
+    columns:
+      - name: reporting_rate_pct
+        data_tests: [not_null]

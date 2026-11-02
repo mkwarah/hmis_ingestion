@@ -1,0 +1,41 @@
+# dbt project for the DATA LAKE half of the platform (Silo).
+#
+#   landing      - sources: bronze Parquet written by the Prefect pipeline.
+#                  dbt only reads them.
+#   staging      - one model per source: rename, cast, trim, parse DHIS2
+#                  periods. No joins.        -> s3://hmis-datalake/staging/
+#   intermediate - joins: org unit hierarchy, values enriched with names.
+#                                            -> s3://hmis-datalake/intermediate/
+#
+# DuckDB does the work and writes every model back to Silo as Parquet
+# (materialized: external), so all layers are visible in the Silo console.
+# The gold marts live in ClickHouse and are built by ../warehouse.
+
+name: hmis_lake
+version: "1.0.0"
+config-version: 2
+profile: hmis_lake
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+snapshot-paths: ["snapshots"]
+
+clean-targets: ["target", "dbt_packages"]
+
+# The lake bucket comes from HMIS_LAKE_BUCKET (default s3://hmis-datalake),
+# set as external_root in profiles.yml. Sources read <bucket>/bronze/dhis2;
+# models write <bucket>/<schema>/dhis2/<model>.parquet
+# (macros/external_location.sql).
+models:
+  hmis_lake:
+    staging:
+      +materialized: external
+      +format: parquet
+      +schema: staging
+    intermediate:
+      +materialized: external
+      +format: parquet
+      +schema: intermediate

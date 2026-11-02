@@ -1,0 +1,79 @@
+version: 2
+
+models:
+  - name: stg_dhis2__data_values
+    description: One row per DHIS2 data value, typed, with the period parsed into dates.
+    columns:
+      - name: data_value_key
+        description: md5 of data set + DHIS2 natural key.
+        data_tests: [unique, not_null]
+      - name: data_set_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__data_sets')
+                field: data_set_id
+      - name: data_element_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__data_elements')
+                field: data_element_id
+      - name: org_unit_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__organisation_units')
+                field: org_unit_id
+      - name: category_option_combo_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_dhis2__category_option_combos')
+                field: category_option_combo_id
+      - name: period_type
+        description: Parsed from the period ID. Null means a format the macro does not know.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Daily, Weekly, WeeklyWednesday, WeeklyThursday, WeeklySaturday,
+                         WeeklySunday, Monthly, Quarterly, SixMonthly, Yearly]
+      - name: period_start_date
+        data_tests: [not_null]
+      - name: period_end_date
+        data_tests: [not_null]
+      - name: value_raw
+        description: The value exactly as DHIS2 sent it (text).
+      - name: value_numeric
+        description: value_raw as a number; null for non-numeric values.
+
+  - name: stg_dhis2__data_elements
+    columns:
+      - name: data_element_id
+        data_tests: [unique, not_null]
+      - name: data_element_name
+        data_tests: [not_null]
+
+  - name: stg_dhis2__organisation_units
+    columns:
+      - name: org_unit_id
+        data_tests: [unique, not_null]
+      - name: org_unit_name
+        data_tests: [not_null]
+      - name: org_unit_level
+        data_tests: [not_null]
+
+  - name: stg_dhis2__category_option_combos
+    columns:
+      - name: category_option_combo_id
+        data_tests: [unique, not_null]
+
+  - name: stg_dhis2__data_sets
+    columns:
+      - name: data_set_id
+        data_tests: [unique, not_null]

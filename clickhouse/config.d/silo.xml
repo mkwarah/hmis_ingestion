@@ -1,0 +1,17 @@
+<!--
+  Named collection `silo`: the lake's address and credentials, kept out of SQL.
+  Values come from the container's environment (see docker-compose.yml).
+
+  Usage:
+    SELECT count() FROM s3(silo, filename = 'intermediate/dhis2/int_dhis2__data_values_enriched.parquet', format = 'Parquet')
+  `filename` is appended to the collection's url (the bucket).
+-->
+<clickhouse>
+    <named_collections>
+        <silo>
+            <url from_env="SILO_URL"/>
+            <access_key_id from_env="SILO_ACCESS_KEY"/>
+            <secret_access_key from_env="SILO_SECRET_KEY"/>
+        </silo>
+    </named_collections>
+</clickhouse>

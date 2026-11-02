@@ -1,0 +1,33 @@
+# dbt project for the WAREHOUSE half of the platform (ClickHouse).
+#
+#   lake  - views over the intermediate Parquet in Silo, read with
+#           ClickHouse's s3() function through the `silo` named collection.
+#           No data is copied; they are the doorway from lake to warehouse.
+#   gold  - the marts: MergeTree tables built from the lake views,
+#           ready for dashboards.
+#
+# Run ../lake first: it writes the intermediate files these models read.
+
+name: hmis_warehouse
+version: "1.0.0"
+config-version: 2
+profile: hmis_warehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+snapshot-paths: ["snapshots"]
+
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  hmis_warehouse:
+    lake:
+      +materialized: view
+      +schema: lake
+    gold:
+      +materialized: table
+      +engine: MergeTree()
+      +schema: gold

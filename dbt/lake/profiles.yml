@@ -1,0 +1,31 @@
+# Connection profile. Kept in the project so the whole class uses the same
+# setup; run dbt from this folder (dbt looks for profiles.yml here first).
+#
+# DuckDB is the engine: it reads Parquet straight from Silo over the S3 API
+# and writes each model back to Silo as Parquet. The local .duckdb file only
+# keeps views pointing at those files (dbt's catalog), not the data.
+#
+# Credentials come from the same MINIO_* variables as the Prefect pipeline,
+# with the local Silo defaults as fallbacks.
+
+hmis_lake:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # Keep the database file off OneDrive (sync locks it). In WSL:
+      #   export HMIS_DUCKDB_PATH=~/hmis-data/hmis.duckdb
+      path: "{{ env_var('HMIS_DUCKDB_PATH', 'hmis.duckdb') }}"
+      # Where `external` models are written: the lake bucket in Silo.
+      external_root: "{{ env_var('HMIS_LAKE_BUCKET', 's3://hmis-datalake') }}"
+      threads: 4
+      extensions:
+        - httpfs
+        - parquet
+      settings:
+        s3_endpoint: "{{ env_var('MINIO_ENDPOINT', 'localhost:9100') }}"
+        s3_access_key_id: "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
+        s3_use_ssl: "{{ env_var('MINIO_SECURE', 'false') }}"
+        s3_url_style: path          # Silo/MinIO: bucket in the path, not the hostname
+        s3_region: us-east-1

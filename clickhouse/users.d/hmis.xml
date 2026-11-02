@@ -1,0 +1,13 @@
+<!--
+  Lets the warehouse user read the lake through the `silo` named collection
+  (ClickHouse otherwise demands GRANT NAMED COLLECTION ON silo, which SQL
+  cannot give a user defined in XML). Merged with the user the image's
+  entrypoint creates from CLICKHOUSE_USER, so the tag must match that name.
+-->
+<clickhouse>
+    <users>
+        <hmis>
+            <named_collection_control>1</named_collection_control>
+        </hmis>
+    </users>
+</clickhouse>

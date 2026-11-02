@@ -1,0 +1,24 @@
+# Connection to the ClickHouse warehouse started by the repo's
+# docker-compose.yml (HTTP on host port 8124). Defaults are the local
+# teaching credentials; set CLICKHOUSE_* to point elsewhere.
+# In ClickHouse a dbt "schema" is a database: models land in `lake` and `gold`.
+
+hmis_warehouse:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      driver: http
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: "{{ env_var('CLICKHOUSE_PORT', '8124') | as_number }}"
+      user: "{{ env_var('CLICKHOUSE_USER', 'hmis') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', 'hmis') }}"
+      schema: gold
+      secure: false
+      threads: 4
+      custom_settings:
+        # dbt fills tables with INSERT INTO gold.x SELECT ... FROM s3(...).
+        # By default ClickHouse then takes the s3() column list from the
+        # *target* table, so source columns the mart renames or aggregates
+        # (period_start_date -> month) vanish. 0 = read the Parquet schema.
+        use_structure_from_insertion_table_in_table_functions: 0

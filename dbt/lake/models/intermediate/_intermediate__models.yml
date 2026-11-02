@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: int_dhis2__org_unit_hierarchy
+    description: One row per org unit with its country, district, chiefdom and facility.
+    columns:
+      - name: org_unit_id
+        data_tests: [unique, not_null]
+      - name: country_name
+        data_tests: [not_null]
+
+  - name: int_dhis2__data_values_enriched
+    description: Data values with names and the full org unit hierarchy. Input for the marts.
+    columns:
+      - name: data_value_key
+        data_tests: [unique, not_null]
+      - name: data_element_name
+        data_tests: [not_null]
+      - name: category_option_combo_name
+        data_tests: [not_null]
+      - name: district_name
+        description: Null only for values reported above district level.
+        data_tests:
+          - not_null:
+              config:
+                where: "org_unit_level >= 2"
+      - name: data_set_name
+        data_tests: [not_null]
+      - name: is_expected_period_type
+        description: >
+          False when the value's period type differs from its data set's
+          (Wednesday weeks in the ISO-weekly IDSR form, daily values in a monthly form). Marts filter on it.
+        data_tests: [not_null]
+
+  - name: int_dhis2__weekly_values_iso
+    description: >
+      Weekly values on ISO weeks. Wednesday weeks are moved to the ISO week
+      holding 5 of their 7 days, but only fill ISO weeks for which the data
+      set has no ISO-week data at all (one report per week).
+    columns:
+      - name: weekly_value_key
+        description: One row per data set, ISO week, org unit, data element and disaggregation.
+        data_tests: [unique, not_null]
+      - name: iso_week_start
+        data_tests: [not_null]
+      - name: is_mapped_from_other_week_type
+        description: True when the value was reported as a Wednesday week and moved.

@@ -1,0 +1,390 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1072" viewBox="0 0 2000 1072" font-family="Inter, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">HMIS data platform architecture</title>
+<desc id="d">DHIS2 is ingested by Prefect into the Silo data lake landing layer as received. dbt transforms it to staging (PII hashed) and intermediate (PII removed) in Silo, then builds gold marts in ClickHouse that Metabase, the dbt docs site and SQL users read.</desc>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6366f1"/></marker><linearGradient id="ul" x1="0" x2="1"><stop offset="0" stop-color="#0ea5e9"/><stop offset="0.5" stop-color="#6366f1"/><stop offset="1" stop-color="#22c55e"/></linearGradient></defs>
+<rect x="0" y="0" width="2000" height="1072" rx="0" fill="#ffffff" stroke="#ffffff" stroke-width="0"/>
+<text x="1000.0" y="50" font-size="36" font-weight="800" fill="#1e293b" text-anchor="middle">HMIS Data Platform Architecture</text>
+<text x="1000.0" y="76" font-size="15" font-weight="400" fill="#64748b" text-anchor="middle">DHIS2  →  Prefect  →  Silo data lake  →  dbt  →  ClickHouse  →  Metabase</text>
+<rect x="950.0" y="86" width="100" height="4" rx="2" fill="url(#ul)"/>
+<rect x="24" y="110" width="250" height="566" rx="16" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.8"/>
+<circle cx="58" cy="150" r="18" fill="#2563eb"/>
+<text x="58" y="156.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+<text x="88" y="146" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">Source System</text>
+<text x="88" y="170" font-size="14" font-weight="400" fill="#64748b" text-anchor="start">DHIS2 (play demo)</text>
+<rect x="40" y="186" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<rect x="51" y="199.0" width="32" height="32" rx="7" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<text x="67" y="219.5" font-size="11" font-weight="800" fill="#2563eb" text-anchor="middle">API</text>
+<text x="94" y="211.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">DHIS2 Web API</text>
+<text x="94" y="228.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">dataValueSets + metadata</text>
+<line x1="258" y1="215" x2="282" y2="215" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="254" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<rect x="55" y="268.0" width="24" height="30" rx="3" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<line x1="60" y1="276.0" x2="74" y2="276.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="282.0" x2="74" y2="282.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="288.0" x2="74" y2="288.0" stroke="#2563eb" stroke-width="1.6"/>
+<text x="94" y="279.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Child Health</text>
+<text x="94" y="296.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">monthly, by facility</text>
+<line x1="258" y1="283" x2="282" y2="283" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="322" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<rect x="55" y="336.0" width="24" height="30" rx="3" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<line x1="60" y1="344.0" x2="74" y2="344.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="350.0" x2="74" y2="350.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="356.0" x2="74" y2="356.0" stroke="#2563eb" stroke-width="1.6"/>
+<text x="94" y="347.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Reproductive Health</text>
+<text x="94" y="364.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">monthly, by facility</text>
+<line x1="258" y1="351" x2="282" y2="351" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="390" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<rect x="55" y="404.0" width="24" height="30" rx="3" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<line x1="60" y1="412.0" x2="74" y2="412.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="418.0" x2="74" y2="418.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="424.0" x2="74" y2="424.0" stroke="#2563eb" stroke-width="1.6"/>
+<text x="94" y="415.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">IDSR Weekly</text>
+<text x="94" y="432.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">weekly disease reports</text>
+<line x1="258" y1="419" x2="282" y2="419" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="458" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<rect x="55" y="472.0" width="24" height="30" rx="3" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<line x1="60" y1="480.0" x2="74" y2="480.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="486.0" x2="74" y2="486.0" stroke="#2563eb" stroke-width="1.6"/>
+<line x1="60" y1="492.0" x2="74" y2="492.0" stroke="#2563eb" stroke-width="1.6"/>
+<text x="94" y="483.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Population</text>
+<text x="94" y="500.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">yearly denominators</text>
+<line x1="258" y1="487" x2="282" y2="487" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="526" width="218" height="58" rx="10" fill="#fff" stroke="#bfdbfe" stroke-width="1.3"/>
+<path d="M67,548.0 v7 M57,561.0 v-6 h20 v6" fill="none" stroke="#2563eb" stroke-width="1.8"/>
+<circle cx="67" cy="545.0" r="4.5" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="57" cy="565.0" r="4.5" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<circle cx="77" cy="565.0" r="4.5" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<text x="94" y="551.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Metadata</text>
+<text x="94" y="568.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">org units, data elements</text>
+<line x1="258" y1="555" x2="282" y2="555" stroke="#6366f1" stroke-width="1.4"/>
+<line x1="282" y1="215" x2="282" y2="555" stroke="#6366f1" stroke-width="1.4"/>
+<rect x="40" y="606" width="218" height="52" rx="8" fill="#dbeafe" stroke="#bfdbfe" stroke-width="1"/>
+<text x="149" y="628" font-size="12" font-weight="400" fill="#1e40af" text-anchor="middle">DHIS2 stays unchanged. Data</text>
+<text x="149" y="644" font-size="12" font-weight="400" fill="#1e40af" text-anchor="middle">is copied, not moved.</text>
+<rect x="296" y="110" width="270" height="566" rx="16" fill="#f0fdfa" stroke="#5eead4" stroke-width="1.8"/>
+<circle cx="330" cy="150" r="18" fill="#0d9488"/>
+<text x="330" y="156.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+<text x="360" y="146" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">Ingestion</text>
+<text x="360" y="170" font-size="14" font-weight="400" fill="#64748b" text-anchor="start">DHIS2 → Silo landing, by Prefect</text>
+<text x="314" y="198" font-size="13" font-weight="400" fill="#475569" text-anchor="start">Copies DHIS2 payloads into the</text>
+<text x="314" y="215" font-size="13" font-weight="400" fill="#475569" text-anchor="start">Silo landing layer exactly as</text>
+<text x="314" y="232" font-size="13" font-weight="400" fill="#475569" text-anchor="start">received. This step is not dbt.</text>
+<rect x="312" y="250" width="238" height="300" rx="10" fill="#fff" stroke="#99f6e4" stroke-width="1.3"/>
+<rect x="322" y="262" width="218" height="62" rx="10" fill="#f0fdfa" stroke="#99f6e4" stroke-width="1.3"/>
+<path d="M340,293.0 L358,283.0 M340,293.0 L358,303.0" stroke="#0d9488" stroke-width="2"/>
+<circle cx="340" cy="293.0" r="5" fill="#0d9488"/>
+<circle cx="358" cy="283.0" r="5" fill="#0d9488"/>
+<circle cx="358" cy="303.0" r="5" fill="#0d9488"/>
+<text x="376" y="289.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Prefect 3 flow</text>
+<text x="376" y="306.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">hmis-pipeline: extract, land</text>
+<rect x="322" y="333" width="218" height="62" rx="10" fill="#f0fdfa" stroke="#99f6e4" stroke-width="1.3"/>
+<circle cx="349" cy="364.0" r="13" fill="#fff" stroke="#0d9488" stroke-width="2"/>
+<path d="M349,356.0 v8 l6,4" fill="none" stroke="#0d9488" stroke-width="2" stroke-linecap="round"/>
+<text x="376" y="353.0" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Schedules</text>
+<text x="376" y="370.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">daily, weekly full refresh,</text>
+<text x="376" y="385.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">backfill on demand</text>
+<rect x="322" y="404" width="218" height="62" rx="10" fill="#f0fdfa" stroke="#99f6e4" stroke-width="1.3"/>
+<rect x="336.0" y="422.0" width="24" height="9" rx="2" fill="#0d9488" opacity="0.45"/>
+<rect x="340.0" y="430.0" width="24" height="9" rx="2" fill="#0d9488" opacity="0.7"/>
+<rect x="344.0" y="438.0" width="24" height="9" rx="2" fill="#0d9488" opacity="1"/>
+<text x="376" y="431.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Chunked requests</text>
+<text x="376" y="448.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">by data set and date window</text>
+<rect x="322" y="475" width="218" height="62" rx="10" fill="#f0fdfa" stroke="#99f6e4" stroke-width="1.3"/>
+<rect x="334" y="496.0" width="30" height="21" rx="3" fill="#fff" stroke="#0d9488" stroke-width="2"/>
+<path d="M335,498.0 L349,508.0 L363,498.0" fill="none" stroke="#0d9488" stroke-width="2"/>
+<text x="376" y="502.5" font-size="14" font-weight="700" fill="#0f172a" text-anchor="start">Email alerts</text>
+<text x="376" y="519.5" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">on failure or crash (SMTP)</text>
+<line x1="282" y1="400" x2="310" y2="400" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="312" y="566" width="238" height="92" rx="8" fill="#ccfbf1" stroke="#99f6e4" stroke-width="1"/>
+<text x="431" y="590" font-size="13" font-weight="700" fill="#115e59" text-anchor="middle">Then Prefect runs dbt:</text>
+<text x="431" y="609" font-size="13" font-weight="400" fill="#115e59" text-anchor="middle">lake → warehouse → docs</text>
+<text x="431" y="634" font-size="12" font-weight="400" fill="#115e59" text-anchor="middle">dbt starts from the landing</text>
+<text x="431" y="649" font-size="12" font-weight="400" fill="#115e59" text-anchor="middle">files; it never calls DHIS2.</text>
+<rect x="590" y="110" width="746" height="566" rx="16" fill="#f0f9ff" stroke="#7dd3fc" stroke-width="1.8"/>
+<circle cx="624" cy="150" r="18" fill="#0284c7"/>
+<text x="624" y="156.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+<text x="654" y="146" font-size="22" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#0f172a">Silo Data Lake</tspan><tspan font-size="14" fill="#64748b">  (S3 object storage)</tspan></text>
+<text x="654" y="170" font-size="14" font-weight="400" fill="#64748b" text-anchor="start">Landing, Staging and Intermediate layers · bucket hmis-datalake</text>
+<rect x="1366" y="110" width="270" height="566" rx="16" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.8"/>
+<circle cx="1400" cy="150" r="18" fill="#d97706"/>
+<text x="1400" y="156.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">5</text>
+<text x="1430" y="146" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">ClickHouse</text>
+<text x="1430" y="170" font-size="14" font-weight="400" fill="#64748b" text-anchor="start">Warehouse · Gold only</text>
+<rect x="606" y="196" width="218" height="464" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+<path d="M622,217 v18 a14.0,5 0 0 0 28,0 v-18" fill="#2563eb"/>
+<path d="M622,223 a14.0,5 0 0 0 28,0" fill="none" stroke="#bfdbfe" stroke-width="1.4"/>
+<path d="M622,229 a14.0,5 0 0 0 28,0" fill="none" stroke="#bfdbfe" stroke-width="1.4"/>
+<ellipse cx="636.0" cy="217" rx="14.0" ry="5" fill="#bfdbfe" stroke="#2563eb" stroke-width="1"/>
+<text x="660" y="229" font-size="18" font-weight="700" fill="#0f172a" text-anchor="start">Landing</text>
+<text x="660" y="247" font-size="12.5" font-weight="600" fill="#2563eb" text-anchor="start">(Raw)</text>
+<text x="622" y="278" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">DHIS2 payloads exactly</text>
+<text x="622" y="295" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">as received.</text>
+<circle cx="627" cy="317.8" r="2.4" fill="#2563eb"/>
+<text x="637" y="322" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Gzipped JSON, one file</text>
+<text x="637" y="338" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">per API request</text>
+<circle cx="627" cy="354.8" r="2.4" fill="#2563eb"/>
+<text x="637" y="359" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Every run kept: dataset,</text>
+<text x="637" y="375" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">run_id and mode folders</text>
+<circle cx="627" cy="391.8" r="2.4" fill="#2563eb"/>
+<text x="637" y="396" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">No transformation and</text>
+<text x="637" y="412" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">no business logic</text>
+<circle cx="627" cy="428.8" r="2.4" fill="#2563eb"/>
+<text x="637" y="433" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Holds PII as received;</text>
+<text x="637" y="449" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">access limited to pipeline</text>
+<rect x="620" y="610" width="190" height="36" rx="4" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="627" y="625" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">landing/dhis2/data_values/</text>
+<text x="627" y="639" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">.../run_id=.../*.json.gz</text>
+<text x="622" y="602" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start">e.g.</text>
+<line x1="620" y1="586" x2="810" y2="586" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="622" y="558" font-size="12" fill="#334155" text-anchor="start"><tspan font-weight="700">dbt: </tspan><tspan font-style="italic">sources</tspan><tspan> with a column</tspan></text>
+<text x="622" y="574" font-size="12" fill="#334155" text-anchor="start"><tspan>contract (read_json)</tspan></text>
+<line x1="620" y1="540" x2="810" y2="540" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="854" y="196" width="218" height="464" rx="10" fill="#fff7ed" stroke="#ea580c" stroke-width="2"/>
+<path d="M870,217 v18 a14.0,5 0 0 0 28,0 v-18" fill="#c2410c"/>
+<path d="M870,223 a14.0,5 0 0 0 28,0" fill="none" stroke="#fed7aa" stroke-width="1.4"/>
+<path d="M870,229 a14.0,5 0 0 0 28,0" fill="none" stroke="#fed7aa" stroke-width="1.4"/>
+<ellipse cx="884.0" cy="217" rx="14.0" ry="5" fill="#fed7aa" stroke="#c2410c" stroke-width="1"/>
+<text x="908" y="229" font-size="18" font-weight="700" fill="#0f172a" text-anchor="start">Staging</text>
+<text x="908" y="247" font-size="12.5" font-weight="600" fill="#c2410c" text-anchor="start">(First transformations)</text>
+<text x="870" y="278" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">Cleaned and typed,</text>
+<text x="870" y="295" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">one model per source.</text>
+<circle cx="875" cy="317.8" r="2.4" fill="#c2410c"/>
+<text x="885" y="322" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Unnest payloads, restore</text>
+<text x="885" y="338" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">hoisted fields</text>
+<circle cx="875" cy="354.8" r="2.4" fill="#c2410c"/>
+<text x="885" y="359" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Keep latest snapshot,</text>
+<text x="885" y="375" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">remove duplicates</text>
+<circle cx="875" cy="391.8" r="2.4" fill="#c2410c"/>
+<text x="885" y="396" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Cast types, parse DHIS2</text>
+<text x="885" y="412" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">periods into dates</text>
+<circle cx="875" cy="428.8" r="2.4" fill="#c2410c"/>
+<text x="885" y="433" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">md5 surrogate keys</text>
+<circle cx="875" cy="449.8" r="2.4" fill="#c2410c"/>
+<text x="885" y="454" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700">Hash storedBy</tspan></text>
+<text x="885" y="470" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">(salted SHA-256)</text>
+<rect x="868" y="610" width="190" height="36" rx="4" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="875" y="625" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">staging/dhis2/</text>
+<text x="875" y="639" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">stg_dhis2__data_values.parquet</text>
+<text x="870" y="602" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start">e.g.</text>
+<line x1="868" y1="586" x2="1058" y2="586" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="870" y="558" font-size="12" fill="#334155" text-anchor="start"><tspan font-weight="700">dbt: </tspan><tspan font-style="italic">stg_</tspan><tspan> models, unique /</tspan></text>
+<text x="870" y="574" font-size="12" fill="#334155" text-anchor="start"><tspan>not-null tests, hash check</tspan></text>
+<line x1="868" y1="540" x2="1058" y2="540" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="1102" y="196" width="218" height="464" rx="10" fill="#f1f5f9" stroke="#64748b" stroke-width="2"/>
+<path d="M1118,217 v18 a14.0,5 0 0 0 28,0 v-18" fill="#475569"/>
+<path d="M1118,223 a14.0,5 0 0 0 28,0" fill="none" stroke="#cbd5e1" stroke-width="1.4"/>
+<path d="M1118,229 a14.0,5 0 0 0 28,0" fill="none" stroke="#cbd5e1" stroke-width="1.4"/>
+<ellipse cx="1132.0" cy="217" rx="14.0" ry="5" fill="#cbd5e1" stroke="#475569" stroke-width="1"/>
+<text x="1156" y="229" font-size="18" font-weight="700" fill="#0f172a" text-anchor="start">Intermediate</text>
+<text x="1156" y="247" font-size="12.5" font-weight="600" fill="#475569" text-anchor="start">(Integrated, PII-free)</text>
+<text x="1118" y="278" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">Joined and conformed,</text>
+<text x="1118" y="295" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">no personal data.</text>
+<circle cx="1123" cy="317.8" r="2.4" fill="#475569"/>
+<text x="1133" y="322" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Org unit hierarchy from</text>
+<text x="1133" y="338" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">country to facility</text>
+<circle cx="1123" cy="354.8" r="2.4" fill="#475569"/>
+<text x="1133" y="359" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Join data elements,</text>
+<text x="1133" y="375" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">disaggregations, data sets</text>
+<circle cx="1123" cy="391.8" r="2.4" fill="#475569"/>
+<text x="1133" y="396" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">IDSR Wednesday weeks</text>
+<text x="1133" y="412" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">moved onto ISO weeks</text>
+<circle cx="1123" cy="428.8" r="2.4" fill="#475569"/>
+<text x="1133" y="433" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Data set assignments</text>
+<text x="1133" y="449" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">(who should report)</text>
+<circle cx="1123" cy="465.8" r="2.4" fill="#475569"/>
+<text x="1133" y="470" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700">Remove all PII:</tspan><tspan> user</tspan></text>
+<text x="1133" y="486" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">hash and comment dropped</text>
+<rect x="1116" y="610" width="190" height="36" rx="4" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="1123" y="625" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">intermediate/dhis2/</text>
+<text x="1123" y="639" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">int_dhis2__data_values_enriched</text>
+<text x="1118" y="602" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start">e.g.</text>
+<line x1="1116" y1="586" x2="1306" y2="586" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="1118" y="558" font-size="12" fill="#334155" text-anchor="start"><tspan font-weight="700">dbt: </tspan><tspan font-style="italic">int_</tspan><tspan> models, test that</tspan></text>
+<text x="1118" y="574" font-size="12" fill="#334155" text-anchor="start"><tspan>no PII column exists</tspan></text>
+<line x1="1116" y1="540" x2="1306" y2="540" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<rect x="1382" y="196" width="238" height="464" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+<path d="M1398,217 v18 a14.0,5 0 0 0 28,0 v-18" fill="#b45309"/>
+<path d="M1398,223 a14.0,5 0 0 0 28,0" fill="none" stroke="#fde68a" stroke-width="1.4"/>
+<path d="M1398,229 a14.0,5 0 0 0 28,0" fill="none" stroke="#fde68a" stroke-width="1.4"/>
+<ellipse cx="1412.0" cy="217" rx="14.0" ry="5" fill="#fde68a" stroke="#b45309" stroke-width="1"/>
+<text x="1436" y="229" font-size="18" font-weight="700" fill="#0f172a" text-anchor="start">Gold</text>
+<text x="1436" y="247" font-size="12.5" font-weight="600" fill="#b45309" text-anchor="start">(Reporting)</text>
+<text x="1398" y="278" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">Business-ready marts for</text>
+<text x="1398" y="295" font-size="13" font-weight="700" fill="#0f172a" text-anchor="start">dashboards and analysis.</text>
+<circle cx="1403" cy="317.8" r="2.4" fill="#b45309"/>
+<text x="1413" y="322" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">dim_org_unit; monthly and</text>
+<text x="1413" y="338" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">weekly IDSR facts by district</text>
+<circle cx="1403" cy="354.8" r="2.4" fill="#b45309"/>
+<text x="1413" y="359" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Reporting rates against</text>
+<text x="1413" y="375" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">assigned facilities</text>
+<circle cx="1403" cy="391.8" r="2.4" fill="#b45309"/>
+<text x="1413" y="396" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Coverage, dropout, low birth</text>
+<text x="1413" y="412" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">weight, stillbirth indicators</text>
+<circle cx="1403" cy="428.8" r="2.4" fill="#b45309"/>
+<text x="1413" y="433" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Numerator + denominator:</text>
+<text x="1413" y="449" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">re-aggregated, never averaged</text>
+<circle cx="1403" cy="465.8" r="2.4" fill="#b45309"/>
+<text x="1413" y="470" font-size="12.5" font-weight="400" fill="#334155" text-anchor="start">Read-only user for Metabase</text>
+<rect x="1396" y="610" width="210" height="36" rx="4" fill="#fff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="1403" y="625" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">gold.fct_indicators_</text>
+<text x="1403" y="639" font-size="10.5" font-weight="400" fill="#1e293b" text-anchor="start" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">monthly_district</text>
+<text x="1398" y="602" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start">e.g.</text>
+<line x1="1396" y1="586" x2="1606" y2="586" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="1398" y="558" font-size="12" fill="#334155" text-anchor="start"><tspan font-weight="700">dbt: </tspan><tspan font-style="italic">fct_ / dim_</tspan><tspan> marts; gold</tspan></text>
+<text x="1398" y="574" font-size="12" fill="#334155" text-anchor="start"><tspan>totals reconcile with lake</tspan></text>
+<line x1="1396" y1="540" x2="1606" y2="540" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 3"/>
+<line x1="552" y1="400" x2="604" y2="400" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<line x1="826" y1="426" x2="852" y2="426" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="839.0" y="442" font-size="11" font-weight="800" fill="#6366f1" text-anchor="middle">dbt</text>
+<line x1="1074" y1="426" x2="1100" y2="426" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="1087.0" y="442" font-size="11" font-weight="800" fill="#6366f1" text-anchor="middle">dbt</text>
+<line x1="1322" y1="426" x2="1380" y2="426" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<text x="1351.0" y="442" font-size="11" font-weight="800" fill="#6366f1" text-anchor="middle">dbt</text>
+<text x="1351" y="456" font-size="10" font-weight="400" fill="#64748b" text-anchor="middle" font-family="Consolas, 'SFMono-Regular', Menlo, 'Liberation Mono', monospace">s3(silo)</text>
+<rect x="1662" y="110" width="314" height="566" rx="16" fill="#f0fdf4" stroke="#86efac" stroke-width="1.8"/>
+<circle cx="1696" cy="150" r="18" fill="#16a34a"/>
+<text x="1696" y="156.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">6</text>
+<text x="1726" y="146" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">Analytics /</text>
+<text x="1726" y="172" font-size="22" font-weight="700" fill="#0f172a" text-anchor="start">Consumption</text>
+<text x="1680" y="196" font-size="14" font-weight="400" fill="#64748b" text-anchor="start">Dashboards, docs and SQL</text>
+<rect x="1678" y="212" width="282" height="86" rx="10" fill="#fff" stroke="#bbf7d0" stroke-width="1.3"/>
+<rect x="1691" y="257.0" width="8" height="12" rx="1.5" fill="#16a34a"/>
+<rect x="1702" y="249.0" width="8" height="20" rx="1.5" fill="#16a34a"/>
+<rect x="1713" y="241.0" width="8" height="28" rx="1.5" fill="#16a34a"/>
+<text x="1732" y="244.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Metabase</text>
+<text x="1732" y="261.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">HMIS Overview: 12 charts,</text>
+<text x="1732" y="276.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">District filter · port 3010</text>
+<rect x="1678" y="310" width="282" height="86" rx="10" fill="#fff" stroke="#bbf7d0" stroke-width="1.3"/>
+<circle cx="1700" cy="346.0" r="6" fill="#16a34a"/>
+<circle cx="1712" cy="348.0" r="5" fill="#16a34a" opacity="0.7"/>
+<path d="M1689,367.0 a11,10 0 0 1 22,0 z" fill="#16a34a"/>
+<path d="M1706,367.0 a9,9 0 0 1 16,-2 v2 z" fill="#16a34a" opacity="0.7"/>
+<text x="1732" y="342.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">MoH / HMIS teams</text>
+<text x="1732" y="359.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">Reporting rates, coverage,</text>
+<text x="1732" y="374.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">IDSR trends</text>
+<rect x="1678" y="408" width="282" height="86" rx="10" fill="#fff" stroke="#bbf7d0" stroke-width="1.3"/>
+<path d="M1694,436.0 h15 l8,8 v22 h-23 z" fill="#fff" stroke="#16a34a" stroke-width="2" stroke-linejoin="round"/>
+<path d="M1709,436.0 v8 h8" fill="none" stroke="#16a34a" stroke-width="2"/>
+<line x1="1698" y1="450.0" x2="1713" y2="450.0" stroke="#16a34a" stroke-width="1.5"/>
+<line x1="1698" y1="455.0" x2="1713" y2="455.0" stroke="#16a34a" stroke-width="1.5"/>
+<line x1="1698" y1="460.0" x2="1713" y2="460.0" stroke="#16a34a" stroke-width="1.5"/>
+<text x="1732" y="440.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">dbt docs site</text>
+<text x="1732" y="457.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">Lineage, columns, tests</text>
+<text x="1732" y="472.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">port 8085</text>
+<rect x="1678" y="506" width="282" height="86" rx="10" fill="#fff" stroke="#bbf7d0" stroke-width="1.3"/>
+<rect x="1689" y="535.0" width="32" height="28" rx="6" fill="#fff" stroke="#16a34a" stroke-width="2"/>
+<text x="1705" y="554.0" font-size="12" font-weight="800" fill="#16a34a" text-anchor="middle">&lt;/&gt;</text>
+<text x="1732" y="538.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">SQL &amp; data products</text>
+<text x="1732" y="555.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">ClickHouse :8124, read-only</text>
+<text x="1732" y="570.0" font-size="12" font-weight="400" fill="#64748b" text-anchor="start">user on the gold database</text>
+<line x1="1620" y1="426" x2="1650" y2="426" stroke="#6366f1" stroke-width="1.6"/>
+<line x1="1650" y1="255" x2="1650" y2="549" stroke="#6366f1" stroke-width="1.6"/>
+<line x1="1650" y1="255" x2="1676" y2="255" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<line x1="1650" y1="353" x2="1676" y2="353" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<line x1="1650" y1="451" x2="1676" y2="451" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<line x1="1650" y1="549" x2="1676" y2="549" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="1678" y="612" width="282" height="46" rx="8" fill="#dcfce7" stroke="#bbf7d0" stroke-width="1"/>
+<text x="1819" y="640" font-size="12" font-weight="400" fill="#166534" text-anchor="middle">Only gold is exposed: no PII reaches users</text>
+<line x1="715" y1="662" x2="715" y2="698" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="963" y1="662" x2="963" y2="698" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="1211" y1="662" x2="1211" y2="698" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<line x1="1501" y1="662" x2="1501" y2="698" stroke="#6366f1" stroke-width="1.6" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<rect x="590" y="700" width="1046" height="146" rx="16" fill="#f5f3ff" stroke="#a78bfa" stroke-width="1.8"/>
+<circle cx="624" cy="773" r="18" fill="#7c3aed"/>
+<text x="624" y="779.48" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">4</text>
+<rect x="652" y="749" width="48" height="48" rx="10.56" fill="#ff694b" stroke="#ff694b" stroke-width="0"/>
+<text x="676.0" y="778.76" font-size="18.240000000000002" font-weight="800" fill="#fff" text-anchor="middle">dbt</text>
+<text x="714" y="766" font-size="22" font-weight="700" fill="#7c3aed" text-anchor="start">dbt Processing</text>
+<text x="714" y="788" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="start">Landing → Staging →</text>
+<text x="714" y="806" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="start">Intermediate → Gold</text>
+<rect x="884" y="714" width="520" height="118" rx="10" fill="#fff" stroke="#ddd6fe" stroke-width="1.3"/>
+<text x="902" y="738" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Two dbt projects, one repository</text>
+<text x="902" y="762" font-size="13" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#0f172a">dbt/lake</tspan><tspan fill="#64748b">  ·  dbt-duckdb</tspan></text>
+<text x="902" y="782" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Sources on </tspan><tspan font-weight="700" fill="#2563eb">Landing</tspan></text>
+<text x="902" y="800" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan font-weight="700" fill="#c2410c">Staging</tspan><tspan> models: hash PII</tspan></text>
+<text x="902" y="818" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan font-weight="700" fill="#475569">Intermediate</tspan><tspan> models: drop PII</tspan></text>
+<text x="1148" y="762" font-size="13" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#0f172a">dbt/warehouse</tspan><tspan fill="#64748b">  ·  dbt-clickhouse</tspan></text>
+<text x="1148" y="782" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Lake views over Silo via s3()</tspan></text>
+<text x="1148" y="800" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan font-weight="700" fill="#b45309">Gold</tspan><tspan> marts (fct_ / dim_)</tspan></text>
+<text x="1148" y="818" font-size="12.5" fill="#334155" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Data tests and dbt docs</tspan></text>
+<rect x="1418" y="714" width="204" height="118" rx="10" fill="#fff" stroke="#ddd6fe" stroke-width="1.3"/>
+<text x="1520" y="736" font-size="13" font-weight="700" fill="#6d28d9" text-anchor="middle">dbt reads and writes</text>
+<text x="1520" y="753" font-size="13" font-weight="700" fill="#6d28d9" text-anchor="middle">two systems</text>
+<rect x="1430" y="766" width="84" height="52" rx="8" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.2"/>
+<text x="1472" y="788" font-size="12.5" font-weight="700" fill="#0284c7" text-anchor="middle">Silo</text>
+<text x="1472" y="805" font-size="11" font-weight="400" fill="#64748b" text-anchor="middle">via DuckDB</text>
+<rect x="1522" y="766" width="84" height="52" rx="8" fill="#fffbeb" stroke="#b45309" stroke-width="1.2"/>
+<text x="1564" y="788" font-size="12.5" font-weight="700" fill="#b45309" text-anchor="middle">ClickHouse</text>
+<text x="1564" y="805" font-size="11" font-weight="400" fill="#64748b" text-anchor="middle">gold marts</text>
+<rect x="24" y="868" width="1952" height="78" rx="16" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.8"/>
+<rect x="46" y="881" width="52" height="52" rx="10" fill="#fff" stroke="#ddd6fe" stroke-width="1.2"/>
+<path d="M65,897 v18 M65,907 q0,-8 14,-10" fill="none" stroke="#e0533a" stroke-width="2.4"/>
+<circle cx="65" cy="895" r="4.5" fill="#fff" stroke="#e0533a" stroke-width="2.4"/>
+<circle cx="65" cy="917" r="4.5" fill="#fff" stroke="#e0533a" stroke-width="2.4"/>
+<circle cx="80" cy="897" r="4.5" fill="#fff" stroke="#e0533a" stroke-width="2.4"/>
+<text x="118" y="903" font-size="20" font-weight="700" fill="#0f172a" text-anchor="start">One repository, version-controlled in Git</text>
+<text x="118" y="926" font-size="13.5" font-weight="400" fill="#64748b" text-anchor="start">Ingestion code, both dbt projects, dashboards-as-code and docs live together (github.com/mkwarah/hmis_ingestion)</text>
+<line x1="1028" y1="894" x2="1028" y2="920" stroke="#c4b5fd" stroke-width="1.2"/>
+<text x="1046" y="913" font-size="14" fill="#0f172a" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>dbt lake + warehouse</tspan></text>
+<line x1="1260" y1="894" x2="1260" y2="920" stroke="#c4b5fd" stroke-width="1.2"/>
+<text x="1278" y="913" font-size="14" fill="#0f172a" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Version control (Git)</tspan></text>
+<line x1="1492" y1="894" x2="1492" y2="920" stroke="#c4b5fd" stroke-width="1.2"/>
+<text x="1510" y="913" font-size="14" fill="#0f172a" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Orchestration (Prefect)</tspan></text>
+<line x1="1724" y1="894" x2="1724" y2="920" stroke="#c4b5fd" stroke-width="1.2"/>
+<text x="1742" y="913" font-size="14" fill="#0f172a" text-anchor="start"><tspan font-weight="700" fill="#6366f1">✓ </tspan><tspan>Documentation (dbt docs)</tspan></text>
+<rect x="24" y="966" width="1952" height="88" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+<circle cx="60" cy="1010" r="16" fill="#2563eb"/>
+<text x="60" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+<rect x="86" y="994" width="32" height="32" rx="7" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<text x="102" y="1014.5" font-size="11" font-weight="800" fill="#2563eb" text-anchor="middle">API</text>
+<text x="130" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">DHIS2 Web API</text>
+<text x="130" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Data sets and</text>
+<text x="130" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">metadata</text>
+<line x1="306" y1="1010" x2="344" y2="1010" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<circle cx="382" cy="1010" r="16" fill="#0d9488"/>
+<text x="382" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+<path d="M415,1010 L433,1000 M415,1010 L433,1020" stroke="#0d9488" stroke-width="2"/>
+<circle cx="415" cy="1010" r="5" fill="#0d9488"/>
+<circle cx="433" cy="1000" r="5" fill="#0d9488"/>
+<circle cx="433" cy="1020" r="5" fill="#0d9488"/>
+<text x="452" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Prefect</text>
+<text x="452" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Lands payloads</text>
+<text x="452" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">as received</text>
+<line x1="628" y1="1010" x2="666" y2="1010" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<circle cx="704" cy="1010" r="16" fill="#0284c7"/>
+<text x="704" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+<path d="M732,1001 v18 a14.0,5 0 0 0 28,0 v-18" fill="#0284c7"/>
+<path d="M732,1007 a14.0,5 0 0 0 28,0" fill="none" stroke="#bae6fd" stroke-width="1.4"/>
+<path d="M732,1013 a14.0,5 0 0 0 28,0" fill="none" stroke="#bae6fd" stroke-width="1.4"/>
+<ellipse cx="746.0" cy="1001" rx="14.0" ry="5" fill="#bae6fd" stroke="#0284c7" stroke-width="1"/>
+<text x="774" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Silo data lake</text>
+<text x="774" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Landing, Staging,</text>
+<text x="774" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Intermediate</text>
+<line x1="950" y1="1010" x2="988" y2="1010" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)" marker-start="url(#ah)"/>
+<circle cx="1026" cy="1010" r="16" fill="#7c3aed"/>
+<text x="1026" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">4</text>
+<rect x="1052" y="994" width="32" height="32" rx="7.04" fill="#ff694b" stroke="#ff694b" stroke-width="0"/>
+<text x="1068.0" y="1013.84" font-size="12.16" font-weight="800" fill="#fff" text-anchor="middle">dbt</text>
+<text x="1096" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">dbt</text>
+<text x="1096" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Transforms every layer:</text>
+<text x="1096" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">hashes, then drops PII</text>
+<line x1="1272" y1="1010" x2="1310" y2="1010" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<circle cx="1348" cy="1010" r="16" fill="#d97706"/>
+<text x="1348" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">5</text>
+<path d="M1376,1001 v18 a14.0,5 0 0 0 28,0 v-18" fill="#d97706"/>
+<path d="M1376,1007 a14.0,5 0 0 0 28,0" fill="none" stroke="#fde68a" stroke-width="1.4"/>
+<path d="M1376,1013 a14.0,5 0 0 0 28,0" fill="none" stroke="#fde68a" stroke-width="1.4"/>
+<ellipse cx="1390.0" cy="1001" rx="14.0" ry="5" fill="#fde68a" stroke="#d97706" stroke-width="1"/>
+<text x="1418" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">ClickHouse</text>
+<text x="1418" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Gold marts only,</text>
+<text x="1418" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">read-only for BI</text>
+<line x1="1594" y1="1010" x2="1632" y2="1010" stroke="#6366f1" stroke-width="1.8" marker-end="url(#ah)"/>
+<circle cx="1670" cy="1010" r="16" fill="#16a34a"/>
+<text x="1670" y="1015.76" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">6</text>
+<rect x="1698" y="1012" width="8" height="12" rx="1.5" fill="#16a34a"/>
+<rect x="1709" y="1004" width="8" height="20" rx="1.5" fill="#16a34a"/>
+<rect x="1720" y="996" width="8" height="28" rx="1.5" fill="#16a34a"/>
+<text x="1740" y="998" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Analytics</text>
+<text x="1740" y="1016" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">Metabase, dbt docs,</text>
+<text x="1740" y="1032" font-size="12.5" font-weight="400" fill="#64748b" text-anchor="start">SQL</text>
+</svg>

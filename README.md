@@ -16,6 +16,16 @@ fails.
 
 ## Architecture
 
+![HMIS data platform architecture: DHIS2 → Prefect → Silo data lake (landing, staging, intermediate) → dbt → ClickHouse gold → Metabase](docs/architecture.svg)
+
+Prefect copies DHIS2 into **landing** exactly as received. Everything after
+that is **dbt**: the `dbt/lake` project (dbt-duckdb) builds **staging**
+(hash PII) and **intermediate** (drop PII) back into Silo, and the
+`dbt/warehouse` project (dbt-clickhouse) builds the **gold** marts in
+ClickHouse. The poster is plain SVG (`docs/architecture.svg`), so it can be
+opened in a browser or edited in any vector tool. The diagrams below show
+the same flow in more detail.
+
 ```mermaid
 flowchart LR
     DHIS2[("DHIS2 Web API<br/>play demo")]
@@ -178,7 +188,9 @@ before using the stack anywhere but a laptop.
 │   └── warehouse/           dbt-clickhouse: intermediate → gold marts and indicators
 ├── metabase/
 │   └── setup_metabase.py    dashboard as code: connection, questions, HMIS Overview
-└── docs/index.html          landing page of the dbt docs site
+└── docs/
+    ├── index.html           landing page of the dbt docs site
+    └── architecture.svg     architecture poster shown at the top of this README
 ```
 
 `dbt/lake`, `dbt/warehouse` and `metabase` each have their own README.

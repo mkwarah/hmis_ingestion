@@ -23,34 +23,8 @@ that is **dbt**: the `dbt/lake` project (dbt-duckdb) builds **staging**
 (hash PII) and **intermediate** (drop PII) back into Silo, and the
 `dbt/warehouse` project (dbt-clickhouse) builds the **gold** marts in
 ClickHouse. The poster is plain SVG (`docs/architecture.svg`), so it can be
-opened in a browser or edited in any vector tool. The diagrams below show
-the same flow in more detail.
-
-```mermaid
-flowchart LR
-    DHIS2[("DHIS2 Web API<br/>play demo")]
-
-    subgraph LAKE["Silo: data lake · s3://hmis-datalake"]
-        direction TB
-        LAND["landing/<br/>API payloads AS RECEIVED<br/>(JSON, every run kept)"]
-        STG["staging/<br/>stg_dhis2__*<br/>typed, de-duplicated,<br/>PII hashed"]
-        INT["intermediate/<br/>int_dhis2__*<br/>joined, ISO weeks,<br/>PII removed"]
-        LAND --> STG --> INT
-    end
-
-    subgraph WH["ClickHouse: warehouse"]
-        direction TB
-        LV["lake.* views<br/>read Parquet in place<br/>via s3(silo, …)"]
-        GOLD["gold.*<br/>indicators, reporting rates,<br/>monthly / weekly marts"]
-        LV --> GOLD
-    end
-
-    MB["Metabase<br/>HMIS Overview dashboard"]
-
-    DHIS2 -->|"Prefect: extract, no transformation"| LAND
-    INT -->|"read in place, no copy"| LV
-    GOLD -->|"read-only user"| MB
-```
+opened in a browser or edited in any vector tool. The table below gives
+each step in more detail.
 
 | Step | Tool | From → To | What happens |
 |---|---|---|---|

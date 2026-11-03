@@ -229,13 +229,75 @@ python dataset_ingestion.py --mode full --lookback-months 12
 python metabase/setup_metabase.py          # -> http://localhost:3010
 ```
 
-Other local runs:
+## Running the pipeline
+
+Each person runs the platform on their own laptop, in Ubuntu (WSL), from the
+repository folder. Cloning only downloads the code: run `./setup.sh` once
+first (see Quick start). It also does the first 12-month load unless you
+passed `--skip-data`.
+
+### Option 1: Prefect UI (day to day)
+
+1. Start the worker and keep its terminal open:
+
+   ```bash
+   cd ~/hmis_ingestion
+   ./start_worker.sh
+   ```
+
+2. Open http://localhost:4200 → **Deployments**, pick one and click
+   **Run → Quick run**:
+
+   | Deployment | Use it for |
+   |---|---|
+   | `hmis-daily-incremental` | values changed since the last run (also runs by itself daily at 02:00 Kigali time) |
+   | `hmis-weekly-full-refresh` | reload the last 12 months |
+   | `hmis-backfill` | a longer reload (default 24 months) |
+
+3. Watch the run: ingestion → dbt lake → dbt warehouse → dbt docs, each as
+   its own task.
+
+From a terminal, `prefect deployment run "hmis-pipeline/hmis-daily-incremental"`
+starts the same run as clicking Run. Add `-p with_dbt=false` to ingest
+without rebuilding the models.
+
+**No worker, no run.** Without `./start_worker.sh` running, runs stay
+*Scheduled* or *Pending* and never start.
+
+### Option 2: command line (no worker needed)
 
 ```bash
-python dataset_ingestion.py                # incremental (config default), then dbt
-python dataset_ingestion.py --skip-dbt     # ingest only
+cd ~/hmis_ingestion
+source ~/venvs/hmis-ingestion/bin/activate
+python dataset_ingestion.py --mode incremental        # recent changes, then dbt
+python dataset_ingestion.py --mode full --lookback-months 12   # first load / full reload
+python dataset_ingestion.py --skip-dbt                # ingest into landing only
 python dataset_ingestion.py --mode full --lookback-months 3 --datasets child_health
 ```
+
+These runs also appear in the Prefect UI.
+
+### Check that it worked
+
+- Silo console http://localhost:9101: files under `landing/`, `staging/`
+  and `intermediate/`.
+- Metabase http://localhost:3010: the HMIS Overview dashboard shows the new
+  data (admin@hmis.local / HmisAdmin2026!).
+- dbt docs http://localhost:8085: refreshed after each successful run.
+
+**No HMIS Overview dashboard in Metabase?** `setup.sh` builds it as its last
+step, but skips it with `--skip-data`, and the step-by-step install leaves
+it to you (step 4). Load data if you have not, then build the dashboard:
+
+```bash
+~/venvs/hmis-ingestion/bin/python dataset_ingestion.py --mode full --lookback-months 12
+~/venvs/hmis-ingestion/bin/python metabase/setup_metabase.py
+```
+
+The charts are defined in `metabase/setup_metabase.py`, so every laptop gets
+the same dashboard; re-running it updates the dashboard instead of copying
+it. You only build it once: it reads ClickHouse live, so new runs show up
+by themselves.
 
 To run dbt by hand, export `.env` first (dbt needs `HMIS_HASH_SALT` and
 the `MINIO_*` settings): `set -a; . ./.env; set +a`, then `cd dbt/lake && dbt build`.
@@ -265,9 +327,7 @@ Run the worker. It executes every run, so keep its terminal open:
 ./start_worker.sh
 ```
 
-Start a run by hand: http://localhost:4200 → Deployments → Run, or
-`prefect deployment run "hmis-pipeline/hmis-daily-incremental"`.
-Add `-p with_dbt=false` to ingest without rebuilding the models.
+To start a run by hand, see [Running the pipeline](#running-the-pipeline).
 
 **On a laptop:** WSL stops Ubuntu when no terminal is open, which stops
 Docker and the worker. Scheduled runs only happen while Ubuntu is running;

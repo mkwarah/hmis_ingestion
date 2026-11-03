@@ -175,9 +175,11 @@ before using the stack anywhere but a laptop.
 ├── dataset_ingestion.py     Prefect flows: hmis_pipeline (deployed) and hmis_ingestion; alert hook
 ├── ingestion_config.yml     source, lake, ingestion, transform (dbt), alerts and data set settings
 ├── prefect.yaml             deployments: daily incremental, weekly full refresh, backfill
+├── setup.sh                 one-command install on a laptop (see Quick start)
 ├── start_worker.sh          starts the Prefect worker (WSL)
 ├── docker-compose.yml       Silo, ClickHouse, Prefect, Metabase, dbt docs, Mailpit
 ├── requirements.txt         pipeline dependencies (Prefect, minio, PyYAML, requests, dotenv)
+├── requirements-dbt.txt     dbt-core, dbt-duckdb, dbt-clickhouse (pinned, own venv)
 ├── .env.example             settings, secrets and local credentials (copy to .env)
 ├── clickhouse/
 │   ├── config.d/silo.xml    named collection `silo`: lake URL + keys, kept out of SQL
@@ -199,6 +201,36 @@ before using the stack anywhere but a laptop.
 
 Everything runs in WSL Ubuntu (Docker lives there).
 
+### One command
+
+**What you need first:**
+
+- **On Windows:** WSL with Ubuntu (`wsl --install -d Ubuntu` in PowerShell),
+  then Docker inside it (Docker Engine, or Docker Desktop with WSL
+  integration turned on).
+- **In Ubuntu:** `sudo apt install git curl python3 python3-venv`.
+
+Then, in an Ubuntu terminal:
+
+```bash
+git clone https://github.com/mkwarah/hmis_ingestion.git ~/hmis_ingestion
+cd ~/hmis_ingestion
+./setup.sh                 # add --skip-data to install without loading data
+./start_worker.sh          # keep this terminal open for scheduled runs
+```
+
+`setup.sh` checks the prerequisites and creates `.env` with a new hashing
+salt. It then installs both virtualenvs, starts the containers, registers
+the Prefect deployments, loads 12 months from the DHIS2 demo through every
+layer, and builds the Metabase dashboard. It finishes by printing every URL.
+It is safe to run again: steps already done are skipped and existing `.env`
+values are kept. Clone into the Ubuntu home folder (as above), not
+`/mnt/c/...`, so file access stays fast.
+
+### Step by step
+
+The same steps by hand, if you want to see each one:
+
 ```bash
 cd "<repo>"
 cp .env.example .env
@@ -210,7 +242,7 @@ cp .env.example .env
 python3 -m venv ~/venvs/hmis-ingestion
 ~/venvs/hmis-ingestion/bin/pip install -r requirements.txt
 python3 -m venv ~/venvs/hmis-dbt
-~/venvs/hmis-dbt/bin/pip install "dbt-core>=1.10" "dbt-duckdb>=1.9" "dbt-clickhouse>=1.9"
+~/venvs/hmis-dbt/bin/pip install -r requirements-dbt.txt
 
 # 2. Services
 docker compose up -d

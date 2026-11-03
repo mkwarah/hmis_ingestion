@@ -1,0 +1,6 @@
+# dbt toolchain, installed in its own virtualenv (~/venvs/hmis-dbt) so its
+# dependencies never clash with Prefect's. Versions tested together.
+dbt-core==1.12.6
+dbt-duckdb==1.11.1
+dbt-clickhouse==1.10.3
+duckdb==2.0.0
